@@ -55,7 +55,8 @@
     "supabase",
     "weather",
     "component-library",
-    "Daisy"
+    "Daisy",
+    "Grow"
   ],
   "author": "Joseph Vaughan & Damian Rafferty",
   "license": "MIT"
