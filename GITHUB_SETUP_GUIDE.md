@@ -1,7 +1,49 @@
 # GitHub Setup Guide - App Separation
 
 **Created:** January 7, 2026
+**Updated:** January 22, 2026
 **Purpose:** Set up GitHub repositories and shared library infrastructure before database migration
+
+---
+
+## Recent Progress (cleanup branch)
+
+### Completed Pre-Migration Cleanup
+
+The following cleanup work has been completed on the `cleanup` branch, preparing the codebase for separation:
+
+1. **Mock Data Removal** (Jan 21, 2026)
+   - Removed hardcoded/mock data from Findr and Go Daisy components
+   - Enabled real data fetching for FishingAreaInfo environmental stats
+   - Updated 7-day predictions to fetch real data for missing days
+   - Added proper API methods for local signals, weather tasks, and alerts
+
+2. **Grow Daisy Maturation** (Jan 20-22, 2026)
+   - Added 84 guild blueprints from database
+   - Implemented hardware integrations (4 new integrations with premium tier)
+   - Added subscription/premium tier features
+   - Improved planting calendar linking with species data
+   - Enhanced threat detection (humidity, late blight thresholds)
+
+3. **Code Quality Improvements**
+   - Added Vercel env var helper script to prevent line break issues
+   - Fixed watering recommendations for frozen soil conditions
+   - Improved task authorization flow
+
+### Updated File Counts (as of Jan 22, 2026)
+
+```
+GROW DAISY (significantly expanded):
+- components/grow/: 63 files (was 43, +47% growth)
+- lib/grow/: 40 files (was 20, +100% growth)
+- pages/api/grow/: 57 endpoints (was 23, +148% growth)
+- hooks/useGrow*.ts: 2 hooks (new)
+
+FINDR (stable/consolidated):
+- components/findr/: 72 files (was 58, +24% growth)
+- lib/findr/: 34 files (was 45, consolidated)
+- pages/api/findr/: 32 endpoints (was 30, +7% growth)
+```
 
 ---
 
@@ -24,7 +66,7 @@ We'll create 4 GitHub repositories:
 2. Repository name: `godaisy-core`
 3. Description: "Shared component library for the Daisy app family"
 4. Visibility: **Private** (or Public if you want to open-source it)
-5. ✅ Add a README file
+5. Add a README file
 6. Add .gitignore: **Node**
 7. License: MIT (or your choice)
 8. Click **Create repository**
@@ -43,7 +85,7 @@ cd godaisy-core
 2. Repository name: `findr`
 3. Description: "Fishing predictions app with real-time marine data"
 4. Visibility: **Private**
-5. ✅ Add a README file
+5. Add a README file
 6. Add .gitignore: **Node**
 7. License: MIT (or your choice)
 8. Click **Create repository**
@@ -62,7 +104,7 @@ cd findr
 2. Repository name: `growdaisy`
 3. Description: "Smart gardening and plant management app"
 4. Visibility: **Private**
-5. ✅ Add a README file
+5. Add a README file
 6. Add .gitignore: **Node**
 7. License: MIT (or your choice)
 8. Click **Create repository**
@@ -81,7 +123,7 @@ cd growdaisy
 2. Repository name: `godaisy`
 3. Description: "Weather-informed activity recommendations"
 4. Visibility: **Private**
-5. ✅ Add a README file
+5. Add a README file
 6. Add .gitignore: **Node**
 7. License: MIT (or your choice)
 8. Click **Create repository**
@@ -172,17 +214,16 @@ npm install framer-motion date-fns
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Dovieandi-se-tovya-sagain/godaisy-core.git"
+    "url": "git+https://github.com/YOUR_USERNAME/godaisy-core.git"
   },
   "keywords": [
     "react",
     "nextjs",
     "supabase",
     "weather",
-    "component-library",
-    "Daisy"
+    "component-library"
   ],
-  "author": "Joseph Vaughan & Damian Rafferty",
+  "author": "Your Name",
   "license": "MIT"
 }
 ```
@@ -536,27 +577,27 @@ npm install
 
 ### Step 4: Copy App-Specific Code
 
-**For Findr:**
+**For Findr (138 files total):**
 ```bash
 cd E:\Go_Daisy\wotnow
 
 # Copy Findr-specific pages
 cp -r pages/findr ../findr/pages
 
-# Copy Findr-specific components
+# Copy Findr-specific components (72 files)
 cp -r components/findr ../findr/components
 
-# Copy Findr-specific lib
+# Copy Findr-specific lib (34 files)
 cp -r lib/findr ../findr/lib
 cp -r lib/copernicus ../findr/lib
 
-# Copy Findr-specific hooks
+# Copy Findr-specific hooks (22 hooks)
 cp hooks/useFindr*.ts ../findr/hooks/
 cp hooks/useFish*.ts ../findr/hooks/
 cp hooks/useCatch*.ts ../findr/hooks/
 cp hooks/useFavour*.ts ../findr/hooks/
 
-# Copy Findr-specific API routes
+# Copy Findr-specific API routes (32 endpoints)
 cp -r pages/api/findr ../findr/pages/api
 
 # Copy config files
@@ -564,6 +605,32 @@ cp next.config.js ../findr/
 cp tsconfig.json ../findr/
 cp tailwind.config.ts ../findr/
 cp postcss.config.mjs ../findr/
+```
+
+**For Grow Daisy (162 files total):**
+```bash
+cd E:\Go_Daisy\wotnow
+
+# Copy Grow-specific pages (10 pages)
+cp -r pages/grow ../growdaisy/pages
+
+# Copy Grow-specific components (63 files)
+cp -r components/grow ../growdaisy/components
+
+# Copy Grow-specific lib (40 files)
+cp -r lib/grow ../growdaisy/lib
+
+# Copy Grow-specific hooks (2 hooks)
+cp hooks/useGrow*.ts ../growdaisy/hooks/
+
+# Copy Grow-specific API routes (57 endpoints)
+cp -r pages/api/grow ../growdaisy/pages/api
+
+# Copy config files
+cp next.config.js ../growdaisy/
+cp tsconfig.json ../growdaisy/
+cp tailwind.config.ts ../growdaisy/
+cp postcss.config.mjs ../growdaisy/
 ```
 
 ### Step 5: Update Imports to Use `@godaisy/core`
@@ -641,7 +708,7 @@ git commit -m "Initial commit: Shared component library
 - Shared components (137 components)
 - Published as @godaisy/core@1.0.0-beta.1
 
-Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 
 git push origin main
 ```
@@ -656,10 +723,10 @@ git commit -m "Initial commit: Findr fishing predictions app
 
 - Migrated from monorepo
 - Uses @godaisy/core for shared components
-- Findr-specific code (45 lib files, 22 hooks, 58 components)
+- Findr-specific code (34 lib files, 22 hooks, 72 components)
 - Ready for Supabase migration
 
-Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 
 git push origin main
 ```
@@ -670,7 +737,14 @@ Repeat for `growdaisy` and `godaisy`.
 
 ## Summary Checklist
 
-### GitHub Repositories Created:
+### Pre-Migration Cleanup (COMPLETED Jan 22, 2026):
+- [x] Mock data removed from Findr components
+- [x] Mock data removed from Go Daisy components
+- [x] Grow Daisy features matured (guilds, hardware, subscriptions)
+- [x] Real API endpoints wired up across all apps
+- [x] Code separation verified (no cross-app imports)
+
+### GitHub Repositories To Create:
 - [ ] `godaisy-core` (shared library)
 - [ ] `findr` (fishing app)
 - [ ] `growdaisy` (gardening app)
@@ -685,30 +759,67 @@ Repeat for `growdaisy` and `godaisy`.
 - [ ] Build successful (`npm run build`)
 - [ ] Published to GitHub Packages
 
-### App Setup (Findr):
+### App Setup (Findr - 138 files total):
 - [ ] Next.js app initialized
 - [ ] `@godaisy/core` dependency added
-- [ ] Findr-specific code copied
+- [ ] Findr-specific code copied (72 components, 34 lib files, 32 API endpoints)
 - [ ] Imports updated to use `@godaisy/core`
 - [ ] Local test successful (`npm run dev`)
 - [ ] Pushed to GitHub
 
-### Repeat for Grow Daisy and Go Daisy:
-- [ ] Grow Daisy repository set up
-- [ ] Go Daisy repository set up
+### App Setup (Grow Daisy - 162 files total):
+- [ ] Next.js app initialized
+- [ ] `@godaisy/core` dependency added
+- [ ] Grow-specific code copied (63 components, 40 lib files, 57 API endpoints, 2 hooks)
+- [ ] Imports updated to use `@godaisy/core`
+- [ ] Local test successful (`npm run dev`)
+- [ ] Pushed to GitHub
+
+### App Setup (Go Daisy):
+- [ ] Next.js app initialized
+- [ ] `@godaisy/core` dependency added
+- [ ] Go Daisy-specific code copied
+- [ ] Imports updated to use `@godaisy/core`
+- [ ] Local test successful (`npm run dev`)
+- [ ] Pushed to GitHub
 
 ---
 
 ## Next Steps
 
 Once GitHub setup is complete:
-1. ✅ Create `daisy-auth` Supabase project (Phase 2A)
-2. ✅ Migrate auth data
-3. ✅ Create `findr-production` Supabase project (Phase 3)
-4. ✅ Configure JWT validation
-5. ✅ Deploy to Vercel
+1. Create `daisy-auth` Supabase project (Phase 2A)
+2. Migrate auth data
+3. Create `findr-production` Supabase project (Phase 3)
+4. Configure JWT validation
+5. Deploy to Vercel
 
 **You're now ready for the Supabase migration phase!**
+
+---
+
+## Pre-Migration Status Checklist
+
+### Codebase Readiness (Updated Jan 22, 2026)
+
+**Cleanup Work Completed:**
+- [x] Mock/hardcoded data removed from Findr components
+- [x] Mock/hardcoded data removed from Go Daisy components
+- [x] Real API endpoints wired up for all features
+- [x] Grow Daisy feature maturation (guilds, hardware, subscriptions)
+- [x] Proper authentication flow for all protected endpoints
+
+**Ready for Separation:**
+- [x] Clean code separation by directory (`lib/findr/`, `lib/grow/`, `components/findr/`, `components/grow/`)
+- [x] No cross-app imports (Findr doesn't import Grow, vice versa)
+- [x] Distinct domain boundaries maintained
+- [x] Shared infrastructure well-documented in CLAUDE.md
+
+**Migration Prerequisites:**
+- [ ] Create GitHub repositories (this guide)
+- [ ] Set up `@godaisy/core` package
+- [ ] Create `daisy-auth` Supabase project
+- [ ] Create app-specific Supabase projects
 
 ---
 
@@ -758,7 +869,7 @@ This lets you test changes to `godaisy-core` immediately without publishing.
 When you make changes to `godaisy-core`:
 ```bash
 cd godaisy-core
-npm version patch  # 1.0.0-beta.1 → 1.0.0-beta.2
+npm version patch  # 1.0.0-beta.1 -> 1.0.0-beta.2
 npm run build
 npm publish
 ```
@@ -800,6 +911,44 @@ Now you can publish by creating a git tag:
 ```bash
 git tag v1.0.0-beta.2
 git push --tags
+```
+
+---
+
+## Important Notes on Recent Cleanup
+
+### Why Cleanup Matters for Migration
+
+The cleanup work completed on January 21-22, 2026 is critical for successful migration:
+
+1. **No Mock Data Dependencies**
+   - All components now fetch real data from APIs
+   - No hardcoded data that would break when APIs change
+   - Easier to verify functionality post-migration
+
+2. **Mature Feature Set**
+   - Grow Daisy is now feature-complete for v1.0 (guilds, hardware, subscriptions)
+   - Findr has stable prediction and catch logging features
+   - Fewer breaking changes expected during migration
+
+3. **Clean API Boundaries**
+   - Each app has well-defined API endpoints
+   - No shared state between apps (except auth)
+   - Clear separation enables independent deployment
+
+### Post-Cleanup Validation
+
+Before starting migration, verify:
+```bash
+# Run all tests
+npm test
+
+# Check for cross-app imports (should return nothing)
+grep -r "from '@/lib/findr" components/grow/ lib/grow/
+grep -r "from '@/lib/grow" components/findr/ lib/findr/
+
+# Verify builds pass
+npm run build
 ```
 
 ---
