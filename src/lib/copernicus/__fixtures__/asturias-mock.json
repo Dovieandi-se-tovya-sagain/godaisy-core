@@ -1,0 +1,137 @@
+{
+  "generatedAt": "2025-09-27T20:30:00Z",
+  "physics": {
+    "datasetId": "GLOBAL_ANALYSISFORECAST_PHY_001_024",
+    "variables": ["thetao", "so", "uo", "vo", "mlotst", "zos"],
+    "source": "mock",
+    "records": [
+      {
+        "time": "2025-09-27T06:00:00Z",
+        "depth": 0,
+        "lat": 43.55,
+        "lon": -6.25,
+        "variables": { 
+          "thetao": 17.4, 
+          "so": 35.2,
+          "uo": 0.15,
+          "vo": 0.25,
+          "mlotst": 18.5,
+          "zos": 0.12
+        }
+      },
+      {
+        "time": "2025-09-27T06:00:00Z",
+        "depth": 15,
+        "lat": 43.55,
+        "lon": -6.25,
+        "variables": { 
+          "thetao": 15.8, 
+          "so": 35.4,
+          "uo": 0.12,
+          "vo": 0.20
+        }
+      },
+      {
+        "time": "2025-09-27T12:00:00Z",
+        "depth": 0,
+        "lat": 43.55,
+        "lon": -6.25,
+        "variables": { 
+          "thetao": 18.1, 
+          "so": 35.1,
+          "uo": 0.20,
+          "vo": 0.35,
+          "mlotst": 19.2,
+          "zos": 0.15
+        }
+      }
+    ]
+  },
+  "biogeochemical": {
+    "datasetId": "GLOBAL_ANALYSISFORECAST_BGC_001_028",
+    "variables": ["chl", "o2", "no3", "po4", "kd490", "zooc", "phyc", "nppv"],
+    "source": "mock",
+    "records": [
+      {
+        "time": "2025-09-27T06:00:00Z",
+        "depth": 0,
+        "lat": 43.55,
+        "lon": -6.25,
+        "variables": { 
+          "chl": 1.6, 
+          "o2": 210.0, 
+          "no3": 4.2, 
+          "po4": 0.4, 
+          "kd490": 0.15,
+          "zooc": 2.5,
+          "phyc": 12.0,
+          "nppv": 350.0
+        }
+      },
+      {
+        "time": "2025-09-27T06:00:00Z",
+        "depth": 20,
+        "lat": 43.55,
+        "lon": -6.25,
+        "variables": { 
+          "chl": 0.9, 
+          "o2": 215.0, 
+          "no3": 5.0, 
+          "po4": 0.5, 
+          "kd490": 0.12,
+          "zooc": 1.8,
+          "phyc": 8.5
+        }
+      },
+      {
+        "time": "2025-09-27T12:00:00Z",
+        "depth": 0,
+        "lat": 43.55,
+        "lon": -6.25,
+        "variables": { 
+          "chl": 1.8, 
+          "o2": 208.0, 
+          "no3": 4.1, 
+          "po4": 0.38, 
+          "kd490": 0.18,
+          "zooc": 2.8,
+          "phyc": 13.5,
+          "nppv": 380.0
+        }
+      }
+    ]
+  },
+  "waves": {
+    "datasetId": "GLOBAL_ANALYSISFORECAST_WAV_001_027",
+    "variables": ["vhm0", "vmdr", "vtm10", "vhm0_ww", "vhm0_sw1"],
+    "source": "mock",
+    "records": [
+      {
+        "time": "2025-09-27T06:00:00Z",
+        "depth": 0,
+        "lat": 43.55,
+        "lon": -6.25,
+        "variables": { 
+          "vhm0": 1.2,
+          "vmdr": 285.0,
+          "vtm10": 7.5,
+          "vhm0_ww": 0.8,
+          "vhm0_sw1": 0.9
+        }
+      },
+      {
+        "time": "2025-09-27T12:00:00Z",
+        "depth": 0,
+        "lat": 43.55,
+        "lon": -6.25,
+        "variables": { 
+          "vhm0": 1.5,
+          "vmdr": 290.0,
+          "vtm10": 8.0,
+          "vhm0_ww": 1.0,
+          "vhm0_sw1": 1.1
+        }
+      }
+    ]
+  }
+}
