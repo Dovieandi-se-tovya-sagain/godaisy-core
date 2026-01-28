@@ -5,7 +5,7 @@
  * Handles both optional and required updates.
  *
  * Usage in _app.tsx:
- *   import { UpdatePrompt } from '@/components/UpdatePrompt';
+ *   import { UpdatePrompt } from './UpdatePrompt';
  *
  *   function MyApp({ Component, pageProps }: AppProps) {
  *     return (
@@ -26,7 +26,7 @@ import {
   openAppStore,
   dismissUpdate,
   type UpdateInfo,
-} from '@/lib/app-update/checker';
+} from '../lib/app-update/checker';
 
 export function UpdatePrompt() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);

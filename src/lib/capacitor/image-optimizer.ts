@@ -10,7 +10,7 @@
  * that would timeout or fail to upload on slow connections.
  *
  * Usage:
- *   import { optimizeImage } from '@/lib/capacitor/image-optimizer';
+ *   import { optimizeImage } from './image-optimizer';
  *
  *   const blob = await optimizeImage(file);
  *   // Original: 4MB, 4032x3024

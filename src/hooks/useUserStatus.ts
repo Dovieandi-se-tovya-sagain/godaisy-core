@@ -5,10 +5,10 @@
  */
 
 import { useMemo } from 'react';
-import { useAuth } from '@/context/AuthContext';
-import { useFounderStatus } from '@/hooks/useFounderStatus';
-import { getUserMedals, type UserData, type StatusMedal } from '@/lib/findr/statusMedals';
-import type { CatchSession } from '@/lib/findr/badgeDefinitions';
+import { useAuth } from '../contexts/AuthContext';
+import { useFounderStatus } from './useFounderStatus';
+import { getUserMedals, type UserData, type StatusMedal } from '../lib/findr/statusMedals';
+import type { CatchSession } from '../lib/findr/badgeDefinitions';
 
 interface UseUserStatusResult {
   medals: {

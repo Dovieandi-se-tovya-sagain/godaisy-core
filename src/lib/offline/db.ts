@@ -17,7 +17,7 @@
  */
 
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { createLogger } from '@/lib/utils/logger';
+import { createLogger } from '../utils/logger';
 
 const logger = createLogger('OfflineDB');
 

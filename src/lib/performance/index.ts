@@ -7,7 +7,7 @@
  *
  * 1. Initialize in your app:
  * ```typescript
- * import { usePerformanceInit, useColdStartTracking } from '@/lib/performance';
+ * import { usePerformanceInit, useColdStartTracking } from './';
  *
  * function App() {
  *   usePerformanceInit();
@@ -18,7 +18,7 @@
  *
  * 2. Track screens:
  * ```typescript
- * import { useScreenTracking } from '@/lib/performance';
+ * import { useScreenTracking } from './';
  *
  * function WeeklyTaskView() {
  *   const { markFirstData, markInteractive } = useScreenTracking('WeeklyTaskView');
@@ -34,7 +34,7 @@
  *
  * 3. Track API calls:
  * ```typescript
- * import { trackedFetch, recordCacheHit } from '@/lib/performance';
+ * import { trackedFetch, recordCacheHit } from './';
  *
  * // Network fetch with automatic tracking
  * const response = await trackedFetch('/api/grow/planting-calendar');
@@ -45,7 +45,7 @@
  *
  * 4. View metrics:
  * ```typescript
- * import { perfMetrics } from '@/lib/performance';
+ * import { perfMetrics } from './';
  *
  * // Log to console
  * perfMetrics.logSnapshot();

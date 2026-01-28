@@ -14,7 +14,7 @@
  * - iOS App Store compliance
  *
  * Usage:
- *   import { signInWithApple } from '@/lib/auth/appleSignIn';
+ *   import { signInWithApple } from './appleSignIn';
  *
  *   try {
  *     await signInWithApple(supabaseClient);
@@ -31,7 +31,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { Capacitor } from '@capacitor/core';
-import { createLogger } from '@/lib/utils/logger';
+import { createLogger } from '../utils/logger';
 import { mapAuthError } from './utils';
 
 const logger = createLogger('AppleSignIn');

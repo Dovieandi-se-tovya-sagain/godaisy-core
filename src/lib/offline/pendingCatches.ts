@@ -5,7 +5,7 @@
  * Uses Capacitor Preferences on native platforms, IndexedDB/localStorage on web.
  */
 
-import type { CatchLogInput } from '@/types/findr-enrichment';
+import type { CatchLogInput } from '../findr-enrichment';
 
 export type SyncStatus = 'pending' | 'syncing' | 'failed' | 'synced';
 

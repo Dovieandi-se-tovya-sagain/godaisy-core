@@ -8,7 +8,7 @@
  *
  * Usage:
  * ```typescript
- * import { withRateLimit, withCors } from '@/lib/utils/apiMiddleware';
+ * import { withRateLimit, withCors } from './apiMiddleware';
  *
  * export default withRateLimit(
  *   async function handler(req, res) {

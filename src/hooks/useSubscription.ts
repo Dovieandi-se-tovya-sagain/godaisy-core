@@ -10,11 +10,11 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { createClient } from '../lib/supabase/client';
 import {
   getCachedSubscription,
   setCachedSubscription,
-} from '@/lib/offline/subscriptionCache';
+} from '../lib/offline/subscriptionCache';
 
 export interface SubscriptionStatus {
   userId: string;

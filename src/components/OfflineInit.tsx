@@ -17,7 +17,7 @@ export function OfflineInit() {
         // Initialize secure storage for native apps (must happen before Supabase auth)
         const { Capacitor } = await import('@capacitor/core');
         if (Capacitor.isNativePlatform()) {
-          const { initSecureStorage } = await import('@/lib/capacitor/secureStorage');
+          const { initSecureStorage } = await import('../lib/capacitor/secureStorage');
           await initSecureStorage();
           if (process.env.NODE_ENV === 'development') {
             console.log('[OfflineInit] Secure storage initialized');
@@ -27,7 +27,7 @@ export function OfflineInit() {
           // Wrapped in try-catch as plugin may not be available in hybrid mode
           try {
             console.log('[OfflineInit] Initializing push notifications...');
-            const { initPushNotifications } = await import('@/lib/capacitor/pushNotifications');
+            const { initPushNotifications } = await import('../lib/capacitor/pushNotifications');
             await initPushNotifications();
             console.log('[OfflineInit] Push notifications initialized');
           } catch (pushError) {
@@ -37,14 +37,14 @@ export function OfflineInit() {
         }
 
         // Initialize IndexedDB
-        const { initDB } = await import('@/lib/offline/db');
+        const { initDB } = await import('../lib/offline/db');
         await initDB();
         if (process.env.NODE_ENV === 'development') {
           console.log('[OfflineInit] IndexedDB initialized');
         }
 
         // Start sync service
-        const { getSyncService } = await import('@/lib/offline/sync');
+        const { getSyncService } = await import('../lib/offline/sync');
         const sync = getSyncService();
         sync.start();
         if (process.env.NODE_ENV === 'development') {

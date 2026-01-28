@@ -6,7 +6,7 @@
  *
  * Usage:
  * ```tsx
- * import { OrganizationJsonLd, WebsiteJsonLd, BreadcrumbJsonLd } from '@/components/JsonLd';
+ * import { OrganizationJsonLd, WebsiteJsonLd, BreadcrumbJsonLd } from './JsonLd';
  *
  * <OrganizationJsonLd />
  * <WebsiteJsonLd />

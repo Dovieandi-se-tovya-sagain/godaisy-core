@@ -12,7 +12,7 @@
  * - Graceful degradation (no errors if not supported)
  *
  * Usage:
- *   import { haptics } from '@/lib/capacitor/haptics';
+ *   import { haptics } from './haptics';
  *
  *   // On button press
  *   haptics.light();
@@ -29,7 +29,7 @@
 
 import { Haptics as CapacitorHaptics, ImpactStyle, NotificationType } from '@capacitor/haptics';
 import { Capacitor } from '@capacitor/core';
-import { createLogger } from '@/lib/utils/logger';
+import { createLogger } from '../utils/logger';
 
 const logger = createLogger('Haptics');
 

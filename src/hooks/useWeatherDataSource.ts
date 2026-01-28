@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { createClient } from '../lib/supabase/client';
 import {
   WeatherDataSource,
   UnifiedWeatherData,
@@ -16,7 +16,7 @@ import {
   getUnifiedWeatherData,
   getDataSourceDescription,
   getAccuracyBadge,
-} from '@/lib/grow/weatherDataSource';
+} from '../lib/grow/weatherDataSource';
 
 interface UseWeatherDataSourceOptions {
   latitude?: number;

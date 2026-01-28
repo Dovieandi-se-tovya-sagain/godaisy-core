@@ -12,7 +12,7 @@
  *
  * Usage:
  * ```typescript
- * import { getCurrentPosition, watchPosition } from '@/lib/capacitor/geolocation';
+ * import { getCurrentPosition, watchPosition } from './geolocation';
  *
  * // Get current position once
  * const coords = await getCurrentPosition();

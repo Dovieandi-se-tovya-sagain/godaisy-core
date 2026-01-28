@@ -1,4 +1,4 @@
-import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { WifiOff, Wifi, RefreshCw, Fish, Leaf, Sun } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useState } from 'react';

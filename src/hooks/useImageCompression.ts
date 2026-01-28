@@ -14,7 +14,7 @@ import {
   getCompressionMessage,
   type CompressionResult,
   type CompressionOptions,
-} from '@/lib/image/compressForUpload';
+} from '../lib/image/compressForUpload';
 
 export type CompressionStatus = 'idle' | 'compressing' | 'uploading' | 'success' | 'error';
 

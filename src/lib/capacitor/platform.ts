@@ -10,7 +10,7 @@
  *
  * Usage:
  * ```typescript
- * import { getPlatform, isNative, isIOS, isAndroid, isWeb } from '@/lib/capacitor/platform';
+ * import { getPlatform, isNative, isIOS, isAndroid, isWeb } from './platform';
  *
  * if (isNative()) {
  *   // Use native API

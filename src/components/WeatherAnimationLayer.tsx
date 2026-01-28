@@ -430,9 +430,9 @@ export default function WeatherAnimationLayer(props: WeatherBackplateProps) {
    Usage examples
    =========================
 
-import WeatherAnimationLayer from '@/components/WeatherAnimationLayer';
-import { setBeaufortResolver } from '@/utils/weatherBackground';
-import { getBeaufortNumber } from '@/utils/beaufort';
+import WeatherAnimationLayer from './WeatherAnimationLayer';
+import { setBeaufortResolver } from '../lib/utils/weatherBackground';
+import { getBeaufortNumber } from '../lib/utils/beaufort';
 
 // Wire your own Beaufort converter once (e.g. _app.tsx)
 setBeaufortResolver(getBeaufortNumber);

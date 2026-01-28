@@ -1,6 +1,6 @@
 import Image from "next/image";
 import dayjs from "dayjs";
-import type { OWMForecastSlot } from "@/lib/types";
+import type { OWMForecastSlot } from "../lib/types";
 
 export default function ForecastCards({ slots }: { slots: OWMForecastSlot[] }) {
   return (

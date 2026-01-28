@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useUnifiedLocation } from '../context/UnifiedLocationContext';
+import { useUnifiedLocation } from '../contexts/UnifiedLocationContext';
 import { useOnlineStatus } from './useOnlineStatus';
 import { preCacheAllLocations, getPreCachedRectangles } from '../lib/findr/preCachePredictions';
 import { loadSpeciesBundle, preCacheSpeciesImages } from '../lib/findr/speciesBundle';

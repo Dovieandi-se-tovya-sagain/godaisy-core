@@ -1,4 +1,4 @@
-import type { MarineRow } from "@/lib/types";
+import type { MarineRow } from "../lib/types";
 
 export default function ActivityOutlooks({ rows }: { rows: MarineRow[] }) {
   const midday = rows[Math.min(12, rows.length - 1)];

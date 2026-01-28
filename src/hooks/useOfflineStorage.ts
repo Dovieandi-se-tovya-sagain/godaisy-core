@@ -6,7 +6,7 @@
  *
  * Usage:
  * ```typescript
- * import { useNetworkStatus, useOfflinePrediction, useSyncStatus } from '@/hooks/useOfflineStorage';
+ * import { useNetworkStatus, useOfflinePrediction, useSyncStatus } from './useOfflineStorage';
  *
  * function MyComponent() {
  *   const { isOnline, connectionType } = useNetworkStatus();
@@ -25,9 +25,9 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { getNetworkMonitor, NetworkStatus } from '@/lib/offline/network';
-import { getStorage, CachedPrediction, FreshnessLevel } from '@/lib/offline/storage';
-import { getSyncService, SyncResult } from '@/lib/offline/sync';
+import { getNetworkMonitor, NetworkStatus } from '../lib/offline/network';
+import { getStorage, CachedPrediction, FreshnessLevel } from '../lib/offline/storage';
+import { getSyncService, SyncResult } from '../lib/offline/sync';
 
 /**
  * Hook for monitoring network status
@@ -175,7 +175,7 @@ export function useOfflineStorageReady(): boolean {
 
   useEffect(() => {
     // Initialize database on mount
-    import('@/lib/offline/db')
+    import('../lib/offline/db')
       .then((module) => module.initDB())
       .then(() => {
         setIsReady(true);

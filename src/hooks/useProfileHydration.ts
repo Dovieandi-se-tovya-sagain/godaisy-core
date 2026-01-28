@@ -11,7 +11,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabase/client';
-import { useUserPreferences } from '../context/UserPreferencesContext';
+import { useUserPreferences } from '../contexts/UserPreferencesContext';
 
 const PREFERENCES_STORAGE_KEY = 'preferences';
 

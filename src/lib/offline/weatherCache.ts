@@ -12,7 +12,7 @@
  *
  * Usage:
  * ```typescript
- * import { cacheWeather, getCachedWeather, isWeatherStale } from '@/lib/offline/weatherCache';
+ * import { cacheWeather, getCachedWeather, isWeatherStale } from './weatherCache';
  *
  * // Cache after successful fetch
  * const data = await fetchWeather(lat, lon);

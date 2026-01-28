@@ -12,9 +12,9 @@
  */
 
 import { useEffect, useState } from 'react';
-import { initDB, cleanupOldData, getDatabaseSize } from '@/lib/offline/db';
-import { isNative } from '@/lib/capacitor/platform';
-import { createLogger } from '@/lib/utils/logger';
+import { initDB, cleanupOldData, getDatabaseSize } from '../../lib/offline/db';
+import { isNative } from '../../lib/capacitor/platform';
+import { createLogger } from '../../lib/utils/logger';
 
 const logger = createLogger('OfflineInit');
 

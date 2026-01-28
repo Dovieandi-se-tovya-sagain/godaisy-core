@@ -6,7 +6,7 @@
  *
  * Usage:
  * ```typescript
- * import { SyncService } from '@/lib/offline/sync';
+ * import { SyncService } from './sync';
  *
  * const sync = new SyncService();
  *
@@ -26,7 +26,7 @@
 
 import { getStorage, PendingCatchLog } from './storage';
 import { getNetworkMonitor, NetworkStatus } from './network';
-import { createLogger } from '@/lib/utils/logger';
+import { createLogger } from '../utils/logger';
 
 const logger = createLogger('SyncService');
 

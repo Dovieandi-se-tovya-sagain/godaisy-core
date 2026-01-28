@@ -1,7 +1,7 @@
 // hooks/useUIText.ts
 
 import { useState, useEffect } from 'react';
-import { useLanguage } from '../context/LanguageContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import { createClient } from '@supabase/supabase-js';
 
 // In-memory cache to avoid repeated DB queries

@@ -3,7 +3,7 @@
 import React, { useEffect, useId, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { X, Calendar, Clock, Bell, BellOff, Check, Cloud, Smartphone, Info } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../contexts/AuthContext';
 
 /**
  * Plan data structure stored in localStorage
@@ -202,7 +202,7 @@ export const PlanItSheet: React.FC<PlanItSheetProps> = ({
       // Sync to database for authenticated users
       if (user) {
         try {
-          const { supabase } = await import('@/lib/supabase/client');
+          const { supabase } = await import('../lib/supabase/client');
           const { data: { session } } = await supabase.auth.getSession();
 
           if (session?.access_token) {
@@ -245,7 +245,7 @@ export const PlanItSheet: React.FC<PlanItSheetProps> = ({
       // Schedule reminder notification if enabled (native apps only)
       if (reminderEnabled && isNative) {
         try {
-          const { scheduleReminder } = await import('@/lib/capacitor/pushNotifications');
+          const { scheduleReminder } = await import('../lib/capacitor/pushNotifications');
           const notificationId = await scheduleReminder(plan);
           setReminderScheduled(notificationId !== null);
           if (process.env.NODE_ENV === 'development') {
@@ -539,7 +539,7 @@ export function usePlannedActivities(app?: 'godaisy' | 'findr' | 'growdaisy') {
       // For authenticated users, also fetch from API
       if (user) {
         try {
-          const { supabase } = await import('@/lib/supabase/client');
+          const { supabase } = await import('../lib/supabase/client');
           const { data: { session } } = await supabase.auth.getSession();
 
           if (session?.access_token) {
@@ -605,7 +605,7 @@ export function usePlannedActivities(app?: 'godaisy' | 'findr' | 'growdaisy') {
     // Also delete from cloud for authenticated users
     if (user) {
       try {
-        const { supabase } = await import('@/lib/supabase/client');
+        const { supabase } = await import('../lib/supabase/client');
         const { data: { session } } = await supabase.auth.getSession();
 
         if (session?.access_token) {
@@ -644,7 +644,7 @@ export function usePlannedActivities(app?: 'godaisy' | 'findr' | 'growdaisy') {
     // Update in cloud for authenticated users
     if (user) {
       try {
-        const { supabase } = await import('@/lib/supabase/client');
+        const { supabase } = await import('../lib/supabase/client');
         const { data: { session } } = await supabase.auth.getSession();
 
         if (session?.access_token) {

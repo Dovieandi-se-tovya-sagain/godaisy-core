@@ -11,7 +11,7 @@
  * - User-friendly error messages
  *
  * Usage in API routes:
- *   import { rateLimiter, RateLimitError } from '@/lib/utils/rate-limiter';
+ *   import { rateLimiter, RateLimitError } from './rate-limiter';
  *
  *   export default async function handler(req, res) {
  *     try {

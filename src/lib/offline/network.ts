@@ -6,7 +6,7 @@
  *
  * Usage:
  * ```typescript
- * import { NetworkMonitor } from '@/lib/offline/network';
+ * import { NetworkMonitor } from './network';
  *
  * const monitor = new NetworkMonitor();
  *
@@ -25,7 +25,7 @@
 
 import { Network, ConnectionStatus } from '@capacitor/network';
 import { isNative } from '../capacitor/platform';
-import { createLogger } from '@/lib/utils/logger';
+import { createLogger } from '../utils/logger';
 
 const logger = createLogger('NetworkMonitor');
 

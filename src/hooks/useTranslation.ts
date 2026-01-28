@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { clientTranslate, clientTranslateBatch } from '../lib/translation/clientTranslate';
 import { getUserLanguage, setUserLanguage } from '../lib/user/language';
-import { useLanguage } from '../context/LanguageContext';
+import { useLanguage } from '../contexts/LanguageContext';
 
 /**
  * React hook for translating text with loading states.

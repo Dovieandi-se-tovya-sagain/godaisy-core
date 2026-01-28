@@ -17,7 +17,7 @@
  *   scheduleLocalNotification,
  *   requestPermissions,
  *   registerForPushNotifications,
- * } from '@/lib/capacitor/notifications';
+ * } from './notifications';
  *
  * // Schedule a local notification
  * await scheduleLocalNotification({
@@ -38,7 +38,7 @@ import {
 } from '@capacitor/local-notifications';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { isNative } from './platform';
-import { createLogger } from '@/lib/utils/logger';
+import { createLogger } from '../utils/logger';
 
 const logger = createLogger('Notifications');
 

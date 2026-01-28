@@ -14,7 +14,7 @@
 
 import { App, URLOpenListenerEvent } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { createClient } from '@/lib/supabase/client';
+import { createClient } from '../supabase/client';
 
 const isNative = Capacitor.isNativePlatform();
 

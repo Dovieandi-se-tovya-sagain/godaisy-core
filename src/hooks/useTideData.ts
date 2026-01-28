@@ -13,7 +13,7 @@ import {
   cacheTides,
   isTideCacheStale,
   type TideExtreme,
-} from '@/lib/offline/tideCache';
+} from '../lib/offline/tideCache';
 import { useOnlineStatus } from './useOnlineStatus';
 
 export interface TidePhaseInfo {

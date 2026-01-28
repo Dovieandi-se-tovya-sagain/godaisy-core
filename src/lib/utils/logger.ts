@@ -6,7 +6,7 @@
  * - Production: Only errors output (can be sent to Sentry)
  *
  * Usage:
- *   import { logger } from '@/lib/utils/logger';
+ *   import { logger } from './logger';
  *
  *   logger.debug('Detailed debugging info', { data });
  *   logger.info('Informational message', { context });

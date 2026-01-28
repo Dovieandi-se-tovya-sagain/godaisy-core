@@ -12,7 +12,7 @@
  *
  * Usage:
  * ```typescript
- * import { takePicture, selectFromGallery } from '@/lib/capacitor/camera';
+ * import { takePicture, selectFromGallery } from './camera';
  *
  * // Take a photo with camera
  * const photo = await takePicture({ quality: 90 });
@@ -27,7 +27,7 @@
 import { Camera as CapacitorCamera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { isNative } from './platform';
 import { optimizeImage, type ImageOptimizationResult } from './image-optimizer';
-import { createLogger } from '@/lib/utils/logger';
+import { createLogger } from '../utils/logger';
 
 const logger = createLogger('Camera');
 

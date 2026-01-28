@@ -18,7 +18,7 @@
  * 3. Errors will be automatically tracked
  *
  * Usage:
- *   import { captureError, captureMessage, wrapCapacitorCall } from '@/lib/capacitor/error-tracking';
+ *   import { captureError, captureMessage, wrapCapacitorCall } from './error-tracking';
  *
  *   // Manual error capture
  *   try {
@@ -36,7 +36,7 @@
 
 import { Capacitor } from '@capacitor/core';
 import { Device } from '@capacitor/device';
-import { createLogger } from '@/lib/utils/logger';
+import { createLogger } from '../utils/logger';
 
 const logger = createLogger('ErrorTracking');
 

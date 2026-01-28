@@ -76,7 +76,7 @@ function setupPushListeners(): void {
 
     // If user is authenticated, sync token to server immediately
     try {
-      const { supabase } = await import('@/lib/supabase/client');
+      const { supabase } = await import('../../lib/supabase/client');
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.access_token) {
         console.log('[Push] User authenticated, syncing token...');

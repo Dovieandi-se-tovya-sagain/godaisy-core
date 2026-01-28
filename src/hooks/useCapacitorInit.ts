@@ -6,7 +6,7 @@
  *
  * Usage:
  * ```typescript
- * import { useCapacitorInit } from '@/hooks/useCapacitorInit';
+ * import { useCapacitorInit } from './useCapacitorInit';
  *
  * export default function HomePage() {
  *   const { isReady, isNative, platform } = useCapacitorInit({
@@ -22,7 +22,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { initializeApp, isNativePlatform, getPlatform } from '@/lib/capacitor/appInit';
+import { initializeApp, isNativePlatform, getPlatform } from '../lib/capacitor/appInit';
 
 interface UseCapacitorInitOptions {
   /** Whether to initialize Grow sync (default: true) */

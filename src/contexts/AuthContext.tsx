@@ -6,7 +6,7 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { User, Session, AuthChangeEvent } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase/client';
+import { authClient } from '../lib/supabase/authClient';
 
 interface AuthContextType {
   user: User | null;
@@ -26,14 +26,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Initialize session on mount
   useEffect(() => {
     // Check active session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    authClient.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
     });
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    const { data: { subscription } } = authClient.auth.onAuthStateChange(
       async (_event: AuthChangeEvent, session: Session | null) => {
         setSession(session);
         setUser(session?.user ?? null);
@@ -49,7 +49,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               const { Capacitor } = await import('@capacitor/core');
               if (Capacitor.isNativePlatform()) {
                 console.log('[Auth] Native platform detected, syncing push token...');
-                const { syncPushTokenToServer, getPushToken } = await import('@/lib/capacitor/pushNotifications');
+                const { syncPushTokenToServer, getPushToken } = await import('../lib/capacitor/pushNotifications');
                 const storedToken = getPushToken();
                 if (storedToken) {
                   console.log('[Auth] Found stored token, syncing...');
@@ -108,7 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(null);
 
       // Call Supabase signout
-      await supabase.auth.signOut();
+      await authClient.auth.signOut();
 
       // Clear local storage
       if (typeof window !== 'undefined') {
@@ -124,7 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Refresh session function
   const refreshSession = useCallback(async () => {
     try {
-      const { data: { session }, error } = await supabase.auth.refreshSession();
+      const { data: { session }, error } = await authClient.auth.refreshSession();
       if (error) throw error;
 
       setSession(session);

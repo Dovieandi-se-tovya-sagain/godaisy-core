@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useId } from 'react';
 import { X, MapPin, Heart, ChevronRight, Check, Loader2 } from 'lucide-react';
-import { useUserPreferences } from '../context/UserPreferencesContext';
+import { useUserPreferences } from '../contexts/UserPreferencesContext';
 import { activityTypes } from '../data/activityTypes';
 
 /**

@@ -13,7 +13,7 @@ import {
   reconstructCatchInput,
   type PendingCatch,
 } from './pendingCatches';
-import type { CatchLogInput, CatchLogResponse } from '@/types/findr-enrichment';
+import type { CatchLogInput, CatchLogResponse } from '../findr-enrichment';
 
 export interface SyncProgress {
   total: number;
@@ -160,7 +160,7 @@ async function syncSingleCatch(
  */
 async function getAccessToken(): Promise<string | null> {
   try {
-    const { supabase } = await import('@/lib/supabase/client');
+    const { supabase } = await import('../../lib/supabase/client');
     const { data, error } = await supabase.auth.getSession();
     if (error || !data.session) return null;
     return data.session.access_token;

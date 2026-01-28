@@ -1,4 +1,4 @@
-import { useInstallPrompt } from '@/hooks/useInstallPrompt';
+import { useInstallPrompt } from '../hooks/useInstallPrompt';
 import { X, Download, Share } from 'lucide-react';
 import { useState } from 'react';
 

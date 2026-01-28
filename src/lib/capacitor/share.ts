@@ -12,7 +12,7 @@
  *
  * Usage:
  * ```typescript
- * import { share, shareText, shareUrl, canShare } from '@/lib/capacitor/share';
+ * import { share, shareText, shareUrl, canShare } from './share';
  *
  * // Share text and URL
  * await share({
@@ -37,7 +37,7 @@
 
 import { Share as CapacitorShare } from '@capacitor/share';
 import { isNative } from './platform';
-import { createLogger } from '@/lib/utils/logger';
+import { createLogger } from '../utils/logger';
 
 const logger = createLogger('Share');
 

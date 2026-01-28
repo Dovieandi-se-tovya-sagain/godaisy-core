@@ -18,7 +18,7 @@
  * 3. Events will be automatically tracked
  *
  * Usage:
- *   import { trackEvent, trackScreenView, setUserProperties } from '@/lib/analytics/events';
+ *   import { trackEvent, trackScreenView, setUserProperties } from './events';
  *
  *   // Track user actions
  *   trackEvent('prediction_viewed', {

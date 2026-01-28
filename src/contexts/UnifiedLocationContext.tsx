@@ -1,8 +1,8 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import type { SavedLocation, LocationSlot, LocationSource } from '@/types/multiLocation';
-import { toLegacyFormat as convertToLegacy } from '@/types/multiLocation';
+import type { SavedLocation, LocationSlot, LocationSource } from '../lib/multiLocation';
+import { toLegacyFormat as convertToLegacy } from '../lib/multiLocation';
 
 /**
  * Legacy format for backward compatibility

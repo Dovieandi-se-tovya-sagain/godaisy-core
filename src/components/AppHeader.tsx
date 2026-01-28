@@ -3,7 +3,7 @@
 import React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useUserPreferences } from '../context/UserPreferencesContext';
+import { useUserPreferences } from '../contexts/UserPreferencesContext';
 import { supabase } from '../lib/supabase/client';
 import { LanguageSelector } from './LanguageSelector';
 import { useTranslationMap } from '../lib/translation/useTranslationMap';

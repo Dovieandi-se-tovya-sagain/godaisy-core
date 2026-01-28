@@ -6,7 +6,7 @@
  *
  * Usage:
  * ```typescript
- * import { OfflineStorage } from '@/lib/offline/storage';
+ * import { OfflineStorage } from './storage';
  *
  * const storage = new OfflineStorage();
  *

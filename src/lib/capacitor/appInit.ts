@@ -85,28 +85,18 @@ export async function initializeApp(options: InitOptions = {}): Promise<void> {
 
 /**
  * Initialize Grow Daisy offline sync
+ * TODO: This is Grow-specific and should be implemented in the growdaisy repo
  */
 async function initGrowDaisySync(): Promise<void> {
-  try {
-    const { growOfflineSync } = await import('@/lib/offline/growSync');
-    await growOfflineSync.initialize();
-    console.log('[AppInit] Grow Daisy sync initialized');
-  } catch (error) {
-    console.warn('[AppInit] Failed to initialize Grow sync:', error);
-  }
+  console.log('[AppInit] Grow sync not available in shared library - implement in growdaisy repo');
 }
 
 /**
  * Initialize background sync service
+ * TODO: This is Grow-specific and should be implemented in the growdaisy repo
  */
 async function initBackgroundSyncService(): Promise<void> {
-  try {
-    const { initGrowBackgroundSync } = await import('@/lib/capacitor/backgroundSync');
-    await initGrowBackgroundSync();
-    console.log('[AppInit] Background sync initialized');
-  } catch (error) {
-    console.warn('[AppInit] Failed to initialize background sync:', error);
-  }
+  console.log('[AppInit] Background sync not available in shared library - implement in growdaisy repo');
 }
 
 /**
@@ -114,7 +104,7 @@ async function initBackgroundSyncService(): Promise<void> {
  */
 async function preloadImageCache(urls: string[]): Promise<void> {
   try {
-    const { imageCache } = await import('@/lib/offline/imageCache');
+    const { imageCache } = await import('../../lib/offline/imageCache');
     await imageCache.initialize();
     await imageCache.preloadImages(urls);
     console.log('[AppInit] Preloaded ' + urls.length + ' images');

@@ -6,7 +6,7 @@
  * - Web: Custom toast UI with animations
  *
  * Usage:
- *   import { showToast } from '@/lib/ui/toast';
+ *   import { showToast } from './toast';
  *
  *   showToast('Success!', 'success');
  *   showToast('Error occurred', 'error');

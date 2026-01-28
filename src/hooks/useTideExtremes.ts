@@ -14,7 +14,7 @@ import {
   getCachedTides,
   cacheTides,
   isTideCacheStale,
-} from '@/lib/offline/tideCache';
+} from '../lib/offline/tideCache';
 import { useOnlineStatus } from './useOnlineStatus';
 
 interface TideAPIResponse {

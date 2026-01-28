@@ -186,13 +186,7 @@ export async function initGrowBackgroundSync(): Promise<void> {
     syncOnResume: true,
   });
 
-  // Register Grow Daisy sync callback
-  backgroundSync.registerSync(async () => {
-    try {
-      const { growOfflineSync } = await import('@/lib/offline/growSync');
-      await growOfflineSync.syncPendingChanges();
-    } catch (error) {
-      console.error('[BackgroundSync] Grow sync failed:', error);
-    }
-  });
+  // TODO: Register Grow Daisy sync callback in growdaisy repo
+  // The growOfflineSync module should be implemented in the growdaisy repo
+  console.log('[BackgroundSync] Grow sync not available in shared library');
 }
