@@ -1,0 +1,298 @@
+import React, { useState } from 'react';
+import Image from 'next/image';
+import { getSoilCondition } from '../../utils/getSoilCondition';
+
+interface SoilCardProps {
+  weather: any;
+}
+
+// SoilConditionsPanel component from main file
+const SoilConditionsPanel: React.FC<{
+  soil: {
+    temp0cm?: number;
+    temp6cm?: number;
+    temp18cm?: number;
+    temp54cm?: number;
+    moisture0to1?: number;
+    moisture1to3?: number;
+    moisture3to9?: number;
+    moisture9to27?: number;
+  };
+  timeISO?: string;
+}> = ({ soil, timeISO }) => {
+  const depths = [0, 6, 18, 54] as const;
+  const [depthIdx, setDepthIdx] = useState(0);
+  const depth = depths[depthIdx] as (0|6|18|54);
+  const tempMap: Record<0|6|18|54, number | undefined> = {
+    0: soil.temp0cm,
+    6: soil.temp6cm,
+    18: soil.temp18cm,
+    54: soil.temp54cm,
+  };
+  // Open‑Meteo moisture layers are ranges (0–1, 1–3, 3–9, 9–27 cm), while
+  // temperatures are at fixed depths (0, 6, 18, 54 cm). Map each temp depth
+  // to the nearest moisture layer and surface the layer label when approximated.
+  const moistureForDepth = (d: typeof depth): { value?: number; label?: string; approx: boolean } => {
+    if (d === 0) return { value: soil.moisture0to1, label: '0–1 cm', approx: false };
+    if (d === 6) return { value: soil.moisture3to9, label: '3–9 cm', approx: true };
+    if (d === 18) return { value: soil.moisture9to27, label: '9–27 cm', approx: true };
+    // No OM moisture layer around 54 cm; show deepest available as N/A.
+    return { value: undefined, label: undefined, approx: false };
+  };
+  const t = tempMap[depth];
+  const mInfo = moistureForDepth(depth);
+  const m = mInfo.value;
+  
+  // Simplified advice for display in the new card format - only show 1-2 lines maximum
+  const getSimplifiedAdvice = () => {
+    if (t == null || m == null) return [] as string[];
+    const tips: string[] = [];
+    
+    // Temperature-based advice
+    if (t <= 0) {
+      tips.push('🌡️ Plant activity nearly stops; frozen soil halts growth.');
+    } else if (t <= 5) {
+      tips.push('🌡️ Slow root development in hardy plants only.');
+    } else if (t <= 20) {
+      tips.push('🌡️ Ideal for many spring crops: good root growth.');
+    } else if (t <= 27) {
+      tips.push('🌡️ All depths: Good for many summer crops; rapid growth and nutrient absorption.');
+      tips.push('🌡️ Watch soil moisture as warming increases evaporation.');
+    } else {
+      tips.push('🌡️ Hot soil: growth may be reduced; use mulch and shade.');
+    }
+    
+    // Moisture-based advice
+    if (m < 0.15) {
+      tips.push('💧 Dry: soil retains some moisture; shallow-rooted plants may struggle.');
+    } else if (m < 0.35) {
+      tips.push('💧 Moderate: optimal for many temperate plants.');
+    } else {
+      tips.push('💧 Wet: adequate moisture; watch drainage to avoid root rot.');
+    }
+    
+    return tips;
+  };
+  
+  const simplifiedAdvice = getSimplifiedAdvice();
+  const soilCondition = m != null ? getSoilCondition(m) : "Checking soil";
+  const formattedTime = timeISO ? new Date(timeISO).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "12:00";
+  
+  return (
+    <div>
+      {/* Depth slider with brown gradient */}
+      <input
+        type="range"
+        min={0}
+        max={3}
+        value={depthIdx}
+        onChange={(e) => setDepthIdx(Number(e.target.value))}
+        className="soil-brown-slider range range-xs w-full"
+      />
+      <div className="flex justify-between text-xs text-white/80 mb-4">
+        <span>0 cm</span><span>6 cm</span><span>18 cm</span><span>54 cm</span>
+      </div>
+      
+      {/* Selected depth badge */}
+      <div className="flex mb-3">
+        <div className="bg-white/20 px-4 py-1 rounded-full text-white mr-4">
+          {depth === 0 ? 'Surface' : `${depth} cm`}
+        </div>
+        
+        {/* Temperature on same line */}
+        <div>
+          <span className="text-white whitespace-nowrap">
+            Temp {t != null ? `${Math.round(t)}°C` : '—'}
+          </span>
+        </div>
+      </div>
+      
+      {/* Moisture display */}
+      <div className="mb-3">
+        <span className="text-white whitespace-nowrap">
+          Moisture {m != null ? `${(m * 100).toFixed(2)} m³/m³` : '—'}
+        </span>
+      </div>
+      
+      {/* Snapshot time */}
+      <div className="text-xs text-white/70 mb-3">Snapshot as of {formattedTime}</div>
+      
+      {/* Simplified advice list */}
+      {simplifiedAdvice.map((tip, idx) => (
+        <div key={idx} className="text-white mb-1.5 text-sm flex gap-1.5 items-start">
+          <span>{tip}</span>
+        </div>
+      ))}
+      
+      <style jsx>{`
+        .soil-brown-slider::-webkit-slider-runnable-track {
+          height: 0.5rem;
+          border-radius: 9999px;
+          background: linear-gradient(to right,
+            #ead7bb 0%,
+            #c8a27a 25%,
+            #8b5e34 50%,
+            #4a2f1b 75%,
+            #18120f 100%
+          );
+        }
+        .soil-brown-slider::-moz-range-track {
+          height: 0.5rem;
+          border-radius: 9999px;
+          background: linear-gradient(to right,
+            #ead7bb 0%,
+            #c8a27a 25%,
+            #8b5e34 50%,
+            #4a2f1b 75%,
+            #18120f 100%
+          );
+        }
+        .soil-brown-slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          width: 1rem;
+          height: 1rem;
+          background: white;
+          border-radius: 50%;
+          cursor: pointer;
+          margin-top: -0.25rem;
+        }
+        .soil-brown-slider::-moz-range-thumb {
+          width: 1rem;
+          height: 1rem;
+          background: white;
+          border-radius: 50%;
+          cursor: pointer;
+        }
+      `}</style>
+    </div>
+  );
+};
+
+export const SoilCard: React.FC<SoilCardProps> = ({
+  weather
+}) => {
+  // Extract soil data from weather object
+  const soil = {
+    temp0cm: weather?.soil?.temp0cm,
+    temp6cm: weather?.soil?.temp6cm,
+    temp18cm: weather?.soil?.temp18cm,
+    temp54cm: weather?.soil?.temp54cm,
+    moisture0to1: weather?.soil?.moisture0to1,
+    moisture1to3: weather?.soil?.moisture1to3,
+    moisture3to9: weather?.soil?.moisture3to9,
+    moisture9to27: weather?.soil?.moisture9to27,
+  };
+
+  // Check if we have any soil data
+  const hasSoilData = Object.values(soil).some(v => v != null);
+  
+  // Get soil condition description if moisture data is available
+  const soilCondition = soil.moisture0to1 != null ? getSoilCondition(soil.moisture0to1) : "Ground's nice and soft";
+
+  // Fallback to basic conditions if no soil data available
+  if (!hasSoilData) {
+    const temp = weather?.tempC || weather?.main?.temp;
+    const humidity = weather?.humidity || weather?.main?.humidity;
+
+    return (
+      <div className="card rounded-xl overflow-hidden soil-gradient-bg text-white shadow-md">
+        <div className="card-body p-4">
+          <h3 className="card-title flex justify-between items-center text-white mb-3">
+            <span>Soil Conditions</span>
+          </h3>
+          
+          <div className="text-lg text-white/90 mb-2">{soilCondition}</div>
+          
+          <input
+            type="range"
+            disabled
+            className="soil-brown-slider range range-xs w-full"
+            value={50}
+          />
+          <div className="flex justify-between text-xs text-white/80 mb-3">
+            <span>0 cm</span><span>6 cm</span><span>18 cm</span><span>54 cm</span>
+          </div>
+          
+          <div className="flex mb-2">
+            <div className="bg-white/20 px-4 py-1 rounded-full text-white mr-4">
+              Surface
+            </div>
+            <div>
+              <span className="text-white whitespace-nowrap">
+                Temp {temp != null ? `${Math.round(temp)}°C` : '—'}
+              </span>
+            </div>
+          </div>
+          
+          <div className="mb-3">
+            <span className="text-white whitespace-nowrap">
+              Moisture {humidity != null ? `${humidity}%` : '—'}
+            </span>
+          </div>
+          
+          <div className="text-xs text-white/70 mb-3">Snapshot as of 12:00</div>
+        </div>
+        <style jsx>{`
+          .soil-gradient-bg {
+            background: linear-gradient(135deg, #62a0ea 0%, #1c71d8 100%);
+          }
+          .soil-brown-slider::-webkit-slider-runnable-track {
+            height: 0.5rem;
+            border-radius: 9999px;
+            background: linear-gradient(to right,
+              #ead7bb 0%,
+              #c8a27a 25%,
+              #8b5e34 50%,
+              #4a2f1b 75%,
+              #18120f 100%
+            );
+          }
+          .soil-brown-slider::-moz-range-track {
+            height: 0.5rem;
+            border-radius: 9999px;
+            background: linear-gradient(to right,
+              #ead7bb 0%,
+              #c8a27a 25%,
+              #8b5e34 50%,
+              #4a2f1b 75%,
+              #18120f 100%
+            );
+          }
+          .soil-brown-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 1rem;
+            height: 1rem;
+            background: white;
+            border-radius: 50%;
+            cursor: pointer;
+          }
+          .soil-brown-slider::-moz-range-thumb {
+            width: 1rem;
+            height: 1rem;
+            background: white;
+            border-radius: 50%;
+            cursor: pointer;
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card rounded-xl overflow-hidden soil-gradient-bg text-white shadow-md">
+      <div className="card-body p-4">
+        <h3 className="card-title flex justify-between items-center text-white mb-3">
+          <span>Soil Conditions</span>
+          <span className="text-sm font-normal">{soilCondition}</span>
+        </h3>
+        
+        <SoilConditionsPanel soil={soil} timeISO={weather?.timeISO} />
+      </div>
+      <style jsx>{`
+        .soil-gradient-bg {
+          background: linear-gradient(135deg, #62a0ea 0%, #1c71d8 100%);
+        }
+      `}</style>
+    </div>
+  );
+};

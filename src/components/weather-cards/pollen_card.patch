@@ -1,0 +1,301 @@
+diff --git a/components/weather-cards/PollenCard.tsx b/components/weather-cards/PollenCard.tsx
+new file mode 100644
+index 00000000..f84e84b9
+--- /dev/null
++++ b/components/weather-cards/PollenCard.tsx
+@@ -0,0 +1,297 @@
++import React from 'react';
++import Image from 'next/image';
++
++interface PollenCardProps {
++  pollenAssess: {
++    description?: string;
++    advice?: string;
++  };
++  pollenIdx: number;
++  pollenBadgeClass?: string; // Made optional since we're not using it
++  pollenToday: {
++    grass_pollen?: string;
++    tree_pollen?: string;
++    alder_pollen?: string;
++    birch_pollen?: string;
++    weed_pollen?: string;
++    ragweed_pollen?: string;
++    mugwort_pollen?: string;
++    olive_pollen?: string;
++  };
++}
++
++export const PollenCard: React.FC<PollenCardProps> = ({
++  pollenAssess,
++  pollenIdx,
++  pollenToday = {} // Provide default empty object
++}) => {
++  // Determine pollen risk level based on index
++  const getPollenRiskLevel = (index: number): string => {
++    if (index <= 1) return 'Low';
++    if (index <= 3) return 'Moderate';
++    if (index <= 4) return 'High';
++    return 'Very High';
++  };
++
++  // Get color based on pollen index
++  const getPollenColor = (index: number): string => {
++    if (index <= 1) return '#4ade80'; // Green
++    if (index <= 3) return '#facc15'; // Yellow
++    if (index <= 4) return '#fb923c'; // Orange
++    return '#ef4444'; // Red
++  };
++
++  // Helper to get pollen level color from string
++  const getPollenLevelColor = (level: string): string => {
++    if (level?.toLowerCase().includes('low')) return '#4ade80'; // Green
++    if (level?.toLowerCase().includes('moderate')) return '#facc15'; // Yellow
++    if (level?.toLowerCase().includes('high') && !level?.toLowerCase().includes('very')) return '#fb923c'; // Orange
++    if (level?.toLowerCase().includes('very high')) return '#ef4444'; // Red
++    return '#9ca3af'; // Default gray
++  };
++
++  // Helper to get position on scale from string level
++  const getPollenLevelPosition = (level: string): number => {
++    if (!level) return 0;
++    if (level?.toLowerCase().includes('none')) return 0;
++    if (level?.toLowerCase().includes('low')) return 15;
++    if (level?.toLowerCase().includes('moderate')) return 40;
++    if (level?.toLowerCase().includes('high') && !level?.toLowerCase().includes('very')) return 70;
++    if (level?.toLowerCase().includes('very high')) return 90;
++    if (level?.toLowerCase().includes('extreme')) return 95;
++    return 0;
++  };
++
++  // Calculate position on the scale (0-5)
++  const _pollenScalePosition = (index: number): number => {
++    // Scale to 0-100% where 5 is 100%
++    return Math.min(100, Math.max(0, (index / 5) * 100));
++  };
++  
++  // Helper to get gradient background - version used by the PollenBar component
++  const getPollenGradient = () => {
++    return `linear-gradient(to right, 
++      #4ade80 0%, 
++      #4ade80 10%, 
++      #8cdf7e 10%, 
++      #c9e97c 20%, 
++      #facc15 30%, 
++      #fabb15 40%, 
++      #f9aa15 50%, 
++      #fb923c 60%, 
++      #f67a34 70%, 
++      #f4622c 80%, 
++      #ef4444 90%, 
++      #ef4444 100%
++    )`;
++  };
++
++  const pollenColor = getPollenColor(pollenIdx);
++  const pollenRiskLevel = getPollenRiskLevel(pollenIdx);
++
++// Helper to get pollen descriptions in Go Daisy tone
++const getPollenDescription = (level: string): string => {
++  switch(level) {
++    case 'Low':
++      return '🌿 Hardly any pollen about – most people won’t notice.';
++    case 'Moderate':
++      return '🌼 A fair bit of pollen – sensitive folks may start sneezing.';
++    case 'High':
++      return '🌾 Lots of pollen in the air – allergy sufferers take care.';
++    case 'Very High':
++      return '🌻 Pollen peak – expect strong symptoms, best to limit time outdoors.';
++    default:
++      return '';
++  }
++};
++
++// Helper component for rendering pollen bars
++const PollenBar: React.FC<{
++  level?: string;
++  size?: 'sm' | 'md';
++}> = ({ level, size = 'sm' }) => {
++  const height = size === 'sm' ? 'h-1.5' : 'h-2';
++  const markerSize = size === 'sm' ? 'w-3 h-3' : 'w-4 h-4';
++  const markerTop = size === 'sm' ? '-4px' : '-8px';
++  const markerBorder = size === 'sm' ? 'border' : 'border-2';
++
++  return (
++    <div className="relative">
++      <div className={`w-full ${height} rounded-full overflow-hidden`}>
++        <div 
++          className="h-full w-full"
++          style={{ background: getPollenGradient() }}
++        />
++      </div>
++      <div 
++        className="absolute pointer-events-none"
++        style={{
++          top: markerTop,
++          left: `calc(${level ? getPollenLevelPosition(level) : 0}% - 4px)`,
++        }}
++      >
++        <div 
++          className={`${markerSize} bg-white rounded-full ${markerBorder} shadow-sm`}
++          style={{ borderColor: level ? getPollenLevelColor(level) : '#9ca3af' }}
++        />
++      </div>
++    </div>
++  );
++};
++
++  return (
++    <div className="card bg-black/35 backdrop-blur-sm text-base-content border border-white/10 shadow-sm">
++      <div className="card-body p-4">
++        <div className="flex justify-between items-center">
++          <h3 className="card-title flex items-center gap-2">
++            <Image 
++              src="/weather-icons/design/fill/final/pollen.svg" 
++              alt="Pollen" 
++              width={20}
++              height={20}
++              className="w-5 h-5" 
++            />
++            Pollen
++          </h3>
++          <div className="badge badge-lg" style={{ backgroundColor: pollenColor, color: pollenIdx <= 3 ? 'black' : 'white' }}>
++            {pollenIdx} - {pollenRiskLevel}
++          </div>
++        </div>
++        
++        <div className="my-2">
++          <p className="text-sm opacity-80">
++            {pollenRiskLevel}: {getPollenDescription(pollenRiskLevel)}
++          </p>
++        </div>
++        
++        {/* Pollen Scale bar with marker */}
++        <div className="mt-3 mb-1">
++          <PollenBar level={pollenRiskLevel} size="md" />
++          
++          {/* Scale labels */}
++          <div className="flex justify-between text-xs opacity-80 mt-1">
++            <span>0</span>
++            <span>1</span>
++            <span>3</span>
++            <span>4</span>
++            <span>5</span>
++          </div>
++        </div>
++
++        <div className="text-xs opacity-70 mt-3 mb-2">
++          {pollenAssess?.advice && (
++            <div className="mb-2">{pollenAssess.advice}</div>
++          )}
++        </div>
++        
++        {/* Collapsible detailed pollen types section */}
++        <details className="collapse collapse-arrow bg-black/10 rounded-lg">
++          <summary className="collapse-title text-sm py-2">Pollen Types</summary>
++          <div className="collapse-content">
++            {/* Grass Pollen */}
++            <div className="mb-3">
++              <div className="flex items-center gap-2 mb-1">
++                <Image 
++                  src="/weather-icons/design/fill/final/pollen-grass.svg" 
++                  alt="Grass Pollen" 
++                  width={16}
++                  height={16}
++                  className="w-4 h-4" 
++                />
++                <span className="font-medium">Grass Pollen</span>
++                <span className="text-xs opacity-80">{pollenToday?.grass_pollen || '—'}</span>
++              </div>
++              <PollenBar level={pollenToday?.grass_pollen} size="sm" />
++            </div>
++            
++            {/* Tree Pollen */}
++            <div className="mb-3">
++              <div className="flex items-center gap-2 mb-1">
++                <Image 
++                  src="/weather-icons/design/fill/final/pollen-tree.svg" 
++                  alt="Tree Pollen" 
++                  width={16}
++                  height={16}
++                  className="w-4 h-4" 
++                />
++                <span className="font-medium">Tree Pollen</span>
++                <span className="text-xs opacity-80">{pollenToday?.tree_pollen || '—'}</span>
++              </div>
++              <PollenBar level={pollenToday?.tree_pollen} size="sm" />
++              
++              {/* Specific tree pollen types when available */}
++              {(pollenToday?.alder_pollen || pollenToday?.birch_pollen) && (
++                <div className="pl-5 mt-1 text-xs">
++                  {pollenToday?.alder_pollen && (
++                    <div className="flex items-center justify-between mb-1">
++                      <span className="opacity-80">Alder:</span>
++                      <span className="font-medium">{pollenToday.alder_pollen}</span>
++                    </div>
++                  )}
++                  {pollenToday?.birch_pollen && (
++                    <div className="flex items-center justify-between">
++                      <span className="opacity-80">Birch:</span>
++                      <span className="font-medium">{pollenToday.birch_pollen}</span>
++                    </div>
++                  )}
++                </div>
++              )}
++            </div>
++            
++            {/* Individual tree pollen types are now shown in Tree Pollen section */}
++            
++            {/* Weed Pollen */}
++            <div className="mb-3">
++              <div className="flex items-center gap-2 mb-1">
++                <Image 
++                  src="/weather-icons/design/fill/final/pollen.svg" 
++                  alt="Weed Pollen" 
++                  width={16}
++                  height={16}
++                  className="w-4 h-4" 
++                />
++                <span className="font-medium">Weed Pollen</span>
++                <span className="text-xs opacity-80">{pollenToday?.weed_pollen || '—'}</span>
++              </div>
++              <PollenBar level={pollenToday?.weed_pollen} size="sm" />
++              
++              {/* Specific weed pollen types when available */}
++              {(pollenToday?.ragweed_pollen || pollenToday?.mugwort_pollen) && (
++                <div className="pl-5 mt-1 text-xs">
++                  {pollenToday?.ragweed_pollen && (
++                    <div className="flex items-center justify-between mb-1">
++                      <span className="opacity-80">Ragweed:</span>
++                      <span className="font-medium">{pollenToday.ragweed_pollen}</span>
++                    </div>
++                  )}
++                  {pollenToday?.mugwort_pollen && (
++                    <div className="flex items-center justify-between">
++                      <span className="opacity-80">Mugwort:</span>
++                      <span className="font-medium">{pollenToday.mugwort_pollen}</span>
++                    </div>
++                  )}
++                </div>
++              )}
++            </div>
++            
++            {/* Olive Pollen */}
++            <div>
++              <div className="flex items-center gap-2 mb-1">
++                <Image 
++                  src="/weather-icons/design/fill/final/pollen-olive.svg" 
++                  alt="Olive Pollen" 
++                  width={16}
++                  height={16}
++                  className="w-4 h-4" 
++                />
++                <span className="font-medium">Olive Pollen</span>
++                <span className="text-xs opacity-80">{pollenToday?.olive_pollen || '—'}</span>
++              </div>
++              <PollenBar level={pollenToday?.olive_pollen} size="sm" />
++            </div>
++          </div>
++        </details>
++      </div>
++    </div>
