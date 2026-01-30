@@ -1,7 +1,7 @@
 // components/translation/TranslatedFishCard.tsx
 
 import React from 'react';
-import { useContextualTranslation } from '../../context/LanguageContext';
+import { useContextualTranslation } from '../../contexts/LanguageContext';
 
 interface TranslatedFishNameProps {
   name: string;
