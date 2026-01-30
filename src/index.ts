@@ -42,6 +42,8 @@ export { useUIText } from './hooks/useUIText';
 // Components
 export { LocationPicker } from './components/LocationPicker';
 export { LanguageSelector } from './components/LanguageSelector';
+// Translation components
+export { TranslatedFishName, TranslatedFishBio, TranslatedText } from './components/translation/TranslatedFishCard';
 // TODO: Add more component exports as needed
 
 // Utilities
