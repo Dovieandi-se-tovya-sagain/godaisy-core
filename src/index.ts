@@ -50,10 +50,14 @@ export { TranslatedFishName, TranslatedFishBio, TranslatedText } from './compone
 export { roundNdp, round0dp, round1dp, round2dp, createCacheKey, COORDINATE_PRECISION, CACHE_DURATION_MS } from './lib/utils/coordinates';
 // Weather utilities
 export { getWeatherMessage } from './lib/utils/weatherMessages';
+
+// Multi-location utilities
+export { toLegacyFormat } from './types/multiLocation';
 // TODO: Add more utility exports as needed
 
 // Types
 export type * from './types';
+export type { SavedLocation, LegacyUnifiedLocationRecord } from './types/multiLocation';
 
 // Capacitor/Platform utilities
 export { isNative, getPlatform } from './lib/capacitor/platform';
