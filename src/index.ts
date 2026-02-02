@@ -48,6 +48,8 @@ export { TranslatedFishName, TranslatedFishBio, TranslatedText } from './compone
 
 // Utilities
 export { roundNdp, round0dp, round1dp, round2dp, createCacheKey, COORDINATE_PRECISION, CACHE_DURATION_MS } from './lib/utils/coordinates';
+// Weather utilities
+export { getWeatherMessage } from './lib/utils/weatherMessages';
 // TODO: Add more utility exports as needed
 
 // Types
