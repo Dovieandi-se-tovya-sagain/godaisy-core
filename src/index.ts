@@ -54,3 +54,19 @@ export { getWeatherMessage } from './lib/utils/weatherMessages';
 
 // Types
 export type * from './types';
+
+// Capacitor/Platform utilities
+export { isNative, getPlatform } from './lib/capacitor/platform';
+
+// Date utilities
+export { getTodayIso } from './lib/date/today';
+
+// Share utilities
+export { generateShareToken, getShareUrl } from './lib/share/shareToken';
+export type { FindrShareData } from './lib/share/shareToken';
+
+// Components
+export { default as SEO } from './components/SEO';
+export { default as FindrFooter } from './components/footer';
+export { PlanItSheet } from './components/PlanItSheet';
+export type { PlannedActivity } from './components/PlanItSheet';
