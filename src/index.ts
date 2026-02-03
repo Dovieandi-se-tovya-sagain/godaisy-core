@@ -58,20 +58,6 @@ export type { ToastType, ToastOptions } from './lib/ui/toast';
 // Image utilities
 export { generateBlurDataURL } from './lib/image/placeholder';
 export { compressForUpload } from './lib/image/compressForUpload';
-// Offline cache utilities
-export {
-  getCachedSpeciesAdvice,
-  cacheSpeciesDetails,
-  cacheTacticalAdvice,
-  cacheStrategicAdvice,
-  isTacticalAdviceStale,
-  isStrategicAdviceStale,
-  getAdviceCacheAge,
-  clearSpeciesAdviceCache,
-  speciesAdviceCacheApi,
-  type CachedSpeciesDetails,
-  type CachedSpeciesAdvice,
-} from './lib/offline/speciesAdviceCache';
 
 // Multi-location utilities
 export { toLegacyFormat } from './types/multiLocation';
