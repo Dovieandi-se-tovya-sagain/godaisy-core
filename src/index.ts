@@ -15,7 +15,7 @@ export { useTideData } from './hooks/useTideData';
 export { useTranslation } from './hooks/useTranslation';
 export { useUserLocation } from './hooks/useUserLocation';
 export { useOfflineData } from './hooks/useOfflineData';
-export { useOfflineStorageReady } from './hooks/useOfflineStorage';
+export { useOfflineStorageReady, useNetworkStatus, useSyncStatus, useOfflinePrediction, useCacheSize } from './hooks/useOfflineStorage';
 export { useSharing } from './hooks/useSharing';
 export { useInstallPrompt } from './hooks/useInstallPrompt';
 export { useCapacitorInit } from './hooks/useCapacitorInit';
