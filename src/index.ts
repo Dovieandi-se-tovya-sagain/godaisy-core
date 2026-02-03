@@ -44,6 +44,8 @@ export { LocationPicker } from './components/LocationPicker';
 export { LanguageSelector } from './components/LanguageSelector';
 // Translation components
 export { TranslatedFishName, TranslatedFishBio, TranslatedText } from './components/translation/TranslatedFishCard';
+// Location components
+export { default as CoastalLocationDialog, type BasicLocation } from './components/CoastalLocationDialog';
 // TODO: Add more component exports as needed
 
 // Utilities
