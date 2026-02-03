@@ -55,6 +55,9 @@ export { getWeatherMessage } from './lib/utils/weatherMessages';
 // UI utilities
 export { toast, showToast } from './lib/ui/toast';
 export type { ToastType, ToastOptions } from './lib/ui/toast';
+// Image utilities
+export { generateBlurDataURL } from './lib/image/placeholder';
+export { compressForUpload } from './lib/image/compressForUpload';
 
 // Multi-location utilities
 export { toLegacyFormat } from './types/multiLocation';
