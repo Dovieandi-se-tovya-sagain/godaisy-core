@@ -683,7 +683,7 @@ const CoastalLocationDialog: React.FC<CoastalLocationDialogProps> = ({
         </div>
       </div>
       {open ? (
-        <style jsx global>{`
+        <style>{`
           .pac-container { display: none !important; }
         `}</style>
       ) : null}
