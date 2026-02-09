@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import Image from 'next/image';
+import Image from 'next/image.js';
 
 /**
  * PrecipNext24hCard

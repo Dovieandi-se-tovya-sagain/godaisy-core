@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { usePlacesAutocompleteNew as usePlacesAutocomplete, getGeocode, getLatLng } from '../lib/hooks/usePlacesAutocompleteNew';
-import dynamic from 'next/dynamic';
+import dynamic from 'next/dynamic.js';
 import { loadGoogleMapsAPI } from '../lib/googleMapsLazy';
 import { getCurrentPosition, GeolocationException } from '../lib/capacitor/geolocation';
 

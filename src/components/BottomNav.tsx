@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation.js';
 import { Home, Mountain, CloudSun, Settings } from 'lucide-react';
 import { supabase } from '../lib/supabase/client';
 

@@ -1,6 +1,6 @@
 // components/footer.tsx
-import Link from 'next/link';
-import Image from 'next/image';
+import Link from 'next/link.js';
+import Image from 'next/image.js';
 
 export default function Footer() {
   const year = new Date().getFullYear();

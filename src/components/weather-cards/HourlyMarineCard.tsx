@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import Image from 'next/image';
+import Image from 'next/image.js';
 import BeaufortIcon from '../BeaufortIcon';
 import WindDirectionIcon from '../WindDirectionIcon';
 import { HourlyWithEventsItem, HourlyWithEventsHour, HourlyWithEventsTide, HourlyWithEventsSun } from '../../types/weather';

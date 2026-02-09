@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import Image from 'next/image';
+import Image from 'next/image.js';
 
 interface OptimizedBackgroundImageProps {
   src: string;

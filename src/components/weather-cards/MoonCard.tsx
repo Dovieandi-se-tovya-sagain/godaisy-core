@@ -1,6 +1,6 @@
 import React from 'react';
-import Image from 'next/image';
-import dynamic from 'next/dynamic';
+import Image from 'next/image.js';
+import dynamic from 'next/dynamic.js';
 import type { MoonInfo } from '../../types/weather';
 
 export type MoonCardProps = {
