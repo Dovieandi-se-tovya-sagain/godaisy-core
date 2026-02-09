@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import OptimizedImage from './OptimizedImage';
-import '../styles/Popup.css';
+// import '../styles/Popup.css'; // Apps must import this themselves
 import { getActivityEmoji, getAssessmentEmoji } from '../data/emojiMap';
 import { MARINE_ACTIVITY_IDS, isOutdoor } from '../utils/activityHelpers';
 import bgMap from '../data/bgMap';

@@ -58,7 +58,7 @@ function WindIcon({ windMs, size = 28, alt = 'Wind' }: WindIconProps) {
 import { getMoonLore, MoonPhase } from '../data/moonLore';
 import { useUserPreferences } from '../contexts/UserPreferencesContext';
 import { describeIssPass } from '../utils/issHelper';
-import '../styles/Card.css';
+// import '../styles/Card.css'; // Apps must import this themselves
 import { indieFlower, oxanium } from "../app/fonts";
 import { describeClearestSkiesFromHourly } from '../lib/services/goingOutTonight';
 
