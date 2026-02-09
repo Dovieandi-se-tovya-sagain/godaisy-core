@@ -7,6 +7,14 @@ export default defineConfig({
   splitting: false,
   sourcemap: true,
   clean: true,
-  external: ['react', 'react-dom', 'next'],
+  external: [
+    'react',
+    'react-dom',
+    'next',
+    'next/dynamic',
+    'next/image',
+    'next/link',
+    'next/router',
+  ],
   treeshake: true,
 });
