@@ -1,5 +1,5 @@
 import React from 'react';
-import '../styles/Popup.css';
+// import '../styles/Popup.css'; // Apps must import this themselves
 
 interface MarineData {
   waveHeight?: number;
