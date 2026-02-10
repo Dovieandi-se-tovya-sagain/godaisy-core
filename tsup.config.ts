@@ -17,6 +17,7 @@ import { defineConfig } from 'tsup';
       'next/router',
       'leaflet',
       'react-leaflet',
+      'openmeteo',
       /^@capacitor\/.*/,
       /^@capacitor-community\/.*/,
       /^@capgo\/capacitor.*/,
