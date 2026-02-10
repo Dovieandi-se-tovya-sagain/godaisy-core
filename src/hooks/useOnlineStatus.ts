@@ -2,18 +2,19 @@ import { useEffect, useState } from 'react';
 
 // Type for Capacitor window object (future-proof for native apps)
 interface CapacitorWindow extends Window {
-  Capacitor?: {
-    Plugins: {
-      Network?: {
-        getStatus: () => Promise<{ connected: boolean }>;
-        addListener: (
-          event: string,
-          callback: (status: { connected: boolean }) => void
-        ) => { remove: () => void };
+    Capacitor?: {
+      isNativePlatform?: () => boolean;
+      Plugins: {
+        Network?: {
+          getStatus: () => Promise<{ connected: boolean }>;
+          addListener: (
+            event: string,
+            callback: (status: { connected: boolean }) => void
+          ) => { remove: () => void };
+        };
       };
     };
-  };
-}
+  }
 
 /**
  * Hook to detect online/offline status
@@ -66,16 +67,19 @@ export const useOnlineStatus = () => {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // Check for Capacitor Network plugin (for native apps)
-    // This will be available once Capacitor is installed
-    const capacitorWindow = window as CapacitorWindow;
-    if (typeof window !== 'undefined' && capacitorWindow.Capacitor) {
-      const { Network } = capacitorWindow.Capacitor.Plugins;
+    // Check for Capacitor Network plugin (for native apps only)
+      // Only use Capacitor Network on actual native platforms, not web
+      const capacitorWindow = window as CapacitorWindow;
+      const isNativePlatform = capacitorWindow.Capacitor?.isNativePlatform?.() ?? false;
 
-      if (Network) {
+      if (isNativePlatform && capacitorWindow.Capacitor?.Plugins?.Network) {
+        const Network = capacitorWindow.Capacitor.Plugins.Network;
+
         // Get initial network status
         Network.getStatus().then((status: { connected: boolean }) => {
           setIsOnline(status.connected);
+        }).catch(() => {
+          // Ignore errors - fall back to navigator.onLine
         });
 
         // Listen for network status changes
@@ -91,15 +95,14 @@ export const useOnlineStatus = () => {
         );
 
         return () => {
-            // Check if remove is a function before calling (may not exist on web)
-            if (listener && typeof listener.remove === 'function') {
-              listener.remove();
-            }
-            window.removeEventListener('online', handleOnline);
-            window.removeEventListener('offline', handleOffline);
-          };
+          // Check if remove is a function before calling
+          if (listener && typeof listener.remove === 'function') {
+            listener.remove();
+          }
+          window.removeEventListener('online', handleOnline);
+          window.removeEventListener('offline', handleOffline);
+        };
       }
-    }
 
     return () => {
       window.removeEventListener('online', handleOnline);
