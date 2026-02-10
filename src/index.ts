@@ -52,6 +52,8 @@ export { default as CoastalLocationDialog, type BasicLocation } from './componen
 export { roundNdp, round0dp, round1dp, round2dp, createCacheKey, COORDINATE_PRECISION, CACHE_DURATION_MS } from './lib/utils/coordinates';
 // Weather utilities
 export { getWeatherMessage } from './lib/utils/weatherMessages';
+// Weather services
+export { fetchMetNoLocationForecast, fetchWorldTides } from './lib/services/weatherService';
 // UI utilities
 export { toast, showToast } from './lib/ui/toast';
 export type { ToastType, ToastOptions } from './lib/ui/toast';
