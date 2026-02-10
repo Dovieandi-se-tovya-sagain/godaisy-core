@@ -66,8 +66,10 @@ export class NetworkMonitor {
       });
 
       this.nativeUnsubscribe = () => {
-        listener.remove();
-      };
+    if (listener && typeof listener.remove === 'function') {
+      listener.remove();
+    }
+  };
     } else {
       // Use Navigator API on web
       window.addEventListener('online', this.handleWebOnline);
