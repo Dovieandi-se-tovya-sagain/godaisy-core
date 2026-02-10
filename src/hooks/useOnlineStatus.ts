@@ -91,10 +91,13 @@ export const useOnlineStatus = () => {
         );
 
         return () => {
-          listener.remove();
-          window.removeEventListener('online', handleOnline);
-          window.removeEventListener('offline', handleOffline);
-        };
+            // Check if remove is a function before calling (may not exist on web)
+            if (listener && typeof listener.remove === 'function') {
+              listener.remove();
+            }
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+          };
       }
     }
 
