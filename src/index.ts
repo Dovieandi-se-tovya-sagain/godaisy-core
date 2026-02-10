@@ -54,6 +54,15 @@ export { roundNdp, round0dp, round1dp, round2dp, createCacheKey, COORDINATE_PREC
 export { getWeatherMessage } from './lib/utils/weatherMessages';
 // Weather services
 export { fetchMetNoLocationForecast, fetchWorldTides } from './lib/services/weatherService';
+// Supabase query utilities
+export { queryWithTiming, timedParallelQueries } from './lib/supabase/queryWithTiming';
+// Tide utilities
+export { calculateTidePhase } from './lib/tides/calculateTidePhase';
+export type { TideExtreme } from './lib/tides/calculateTidePhase';
+// Rate limiting
+export { rateLimiter, RateLimitError, addRateLimitHeaders } from './lib/utils/rate-limiter';
+// Findr grid utilities
+export { findNearestGridCellId } from './lib/findr/gridCellLookup';
 // UI utilities
 export { toast, showToast } from './lib/ui/toast';
 export type { ToastType, ToastOptions } from './lib/ui/toast';
