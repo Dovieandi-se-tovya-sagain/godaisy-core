@@ -1,6 +1,7 @@
 // Contexts
 export { AuthProvider, useAuth, useRequireAuth } from './contexts/AuthContext';
 export { UnifiedLocationProvider, useUnifiedLocation } from './contexts/UnifiedLocationContext';
+export type { UnifiedLocationRecord } from './contexts/UnifiedLocationContext';
 export { LanguageProvider, useLanguage } from './contexts/LanguageContext';
 export { UserPreferencesProvider, useUserPreferences } from './contexts/UserPreferencesContext';
 
@@ -9,6 +10,7 @@ export { authClient } from './lib/supabase/authClient';
 export { createDataClient } from './lib/supabase/dataClient';
 export type { DataClientConfig } from './lib/supabase/dataClient';
 export { getSupabaseServerClient } from './lib/supabase/serverClient';
+export { createServerSupabaseClient } from './lib/supabase/pages-api';
 
 // Hooks
 export { useOnlineStatus } from './hooks/useOnlineStatus';
@@ -50,11 +52,14 @@ export { default as CoastalLocationDialog, type BasicLocation } from './componen
 // TODO: Add more component exports as needed
 
 // Utilities
-export { roundNdp, round0dp, round1dp, round2dp, createCacheKey, COORDINATE_PRECISION, CACHE_DURATION_MS } from './lib/utils/coordinates';
+export { roundNdp, round0dp, round1dp, round2dp, round3dp, createCacheKey, COORDINATE_PRECISION, CACHE_DURATION_MS } from './lib/utils/coordinates';
 // Weather utilities
 export { getWeatherMessage } from './lib/utils/weatherMessages';
 // Weather services
 export { fetchMetNoLocationForecast, fetchWorldTides } from './lib/services/weatherService';
+export type { WorldTidesResponse } from './lib/services/weatherService';
+// Weather monitoring
+export { weatherMetrics } from './lib/monitoring/weatherMetrics';
 // Supabase query utilities
 export { queryWithTiming, timedParallelQueries } from './lib/supabase/queryWithTiming';
 // Tide utilities
@@ -74,12 +79,13 @@ export { generateBlurDataURL } from './lib/image/placeholder';
 export { compressForUpload } from './lib/image/compressForUpload';
 
 // Multi-location utilities
-export { toLegacyFormat } from './types/multiLocation';
-// TODO: Add more utility exports as needed
+export { toLegacyFormat, fromLegacyFormat } from './types/multiLocation';
+export { parseLocationsArray, buildLegacyHomeCoordinatesPayload } from './lib/multiLocation/apiHelpers';
+export type { DatabaseRow } from './lib/multiLocation/apiHelpers';
 
 // Types
 export type * from './types';
-export type { SavedLocation, LegacyUnifiedLocationRecord } from './types/multiLocation';
+export type { SavedLocation, LegacyUnifiedLocationRecord, LocationSlot } from './types/multiLocation';
 
 // Capacitor/Platform utilities
 export { isNative, getPlatform } from './lib/capacitor/platform';
