@@ -2,9 +2,9 @@ import { defineConfig } from 'tsup';
 
   export default defineConfig({
     entry: ['src/index.ts'],
-    format: ['cjs', 'esm'],
+    format: ['esm'],  // ESM only - required for code splitting
     dts: true,
-    splitting: false,
+    splitting: true,  // Enable splitting so dynamic imports become separate chunks
     sourcemap: true,
     clean: true,
     external: [
@@ -17,7 +17,6 @@ import { defineConfig } from 'tsup';
       'next/router',
       'leaflet',
       'react-leaflet',
-      // Capacitor packages - must be external to avoid SSR issues
       /^@capacitor\/.*/,
       /^@capacitor-community\/.*/,
       /^@capgo\/capacitor.*/,
