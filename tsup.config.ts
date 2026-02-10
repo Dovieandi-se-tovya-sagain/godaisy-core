@@ -15,6 +15,8 @@ import { defineConfig } from 'tsup';
       'next/image',
       'next/link',
       'next/router',
+      'leaflet',
+      'react-leaflet',
       // Capacitor packages - must be external to avoid SSR issues
       /^@capacitor\/.*/,
       /^@capacitor-community\/.*/,
