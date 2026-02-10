@@ -8,6 +8,7 @@ export { UserPreferencesProvider, useUserPreferences } from './contexts/UserPref
 export { authClient } from './lib/supabase/authClient';
 export { createDataClient } from './lib/supabase/dataClient';
 export type { DataClientConfig } from './lib/supabase/dataClient';
+export { getSupabaseServerClient } from './lib/supabase/serverClient';
 
 // Hooks
 export { useOnlineStatus } from './hooks/useOnlineStatus';
@@ -61,6 +62,8 @@ export { calculateTidePhase } from './lib/tides/calculateTidePhase';
 export type { TideExtreme } from './lib/tides/calculateTidePhase';
 // Rate limiting
 export { rateLimiter, RateLimitError, addRateLimitHeaders } from './lib/utils/rate-limiter';
+// CORS
+export { applyCors } from './lib/utils/cors';
 // Findr grid utilities
 export { findNearestGridCellId } from './lib/findr/gridCellLookup';
 // UI utilities
