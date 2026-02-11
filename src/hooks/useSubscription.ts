@@ -10,7 +10,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { createClient } from '../lib/supabase/client';
+import { supabase } from '../lib/supabase/client';
 import {
   getCachedSubscription,
   setCachedSubscription,
@@ -63,8 +63,6 @@ export function useSubscription(userId?: string): UseSubscriptionState {
   const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  const supabase = createClient();
-
   /**
    * Fetch subscription data from Supabase.
    */

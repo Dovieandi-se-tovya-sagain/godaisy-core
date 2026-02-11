@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { createClient } from '../lib/supabase/client';
+import { supabase } from '../lib/supabase/client';
 import {
   WeatherDataSource,
   UnifiedWeatherData,
@@ -62,8 +62,6 @@ export function useWeatherDataSource(
   const [data, setData] = useState<UnifiedWeatherData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const supabase = createClient();
 
   const fetchData = useCallback(async () => {
     try {

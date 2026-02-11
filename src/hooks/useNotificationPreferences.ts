@@ -1,12 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { createClient } from '../lib/supabase/client';
+import { supabase } from '../lib/supabase/client';
 import type { NotificationPreferences, UpdatePreferencesRequest } from '../pages/api/findr/notification-preferences';
 
 /**
  * Fetch notification preferences from the API
  */
 async function fetchNotificationPreferences(): Promise<NotificationPreferences> {
-  const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
 
   if (!session?.access_token) {
@@ -35,7 +34,6 @@ async function fetchNotificationPreferences(): Promise<NotificationPreferences> 
 async function updateNotificationPreferences(
   updates: UpdatePreferencesRequest
 ): Promise<NotificationPreferences> {
-  const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
 
   if (!session?.access_token) {
