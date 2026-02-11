@@ -106,6 +106,10 @@ export type { LocalNotificationOptions, NotificationSchedule, PermissionStatus, 
 export { getCachedCatchHistory, cacheCatchHistory, addCatchToCache, updateCatchInCache, clearCatchHistoryCache, getCatchHistoryCacheStats, catchHistoryApi } from './lib/offline/catchHistory';
 export type { CachedCatch, CatchHistoryCache } from './lib/offline/catchHistory';
 
+// Water clarity utilities
+export { clarityFromKd490, clarityFromChlorophyll, combinedClarity, calculateWaterClarity, interpretClarity, chlorophyllToWaterClarityIndex } from './lib/utils/waterClarity';
+export type { WaterClarityData } from './lib/utils/waterClarity';
+
 // Date utilities
 export { getTodayIso } from './lib/date/today';
 
