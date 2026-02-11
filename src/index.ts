@@ -56,7 +56,7 @@ export { roundNdp, round0dp, round1dp, round2dp, round3dp, createCacheKey, COORD
 // Weather utilities
 export { getWeatherMessage } from './lib/utils/weatherMessages';
 // Weather services
-export { fetchMetNoLocationForecast, fetchWorldTides } from './lib/services/weatherService';
+export { fetchMetNoLocationForecast, fetchMetNoMarineSeries, fetchOpenMeteoMarineSeries, fetchWorldTides } from './lib/services/weatherService';
 export type { WorldTidesResponse } from './lib/services/weatherService';
 // Weather monitoring
 export { weatherMetrics } from './lib/monitoring/weatherMetrics';
