@@ -56,8 +56,11 @@ export { roundNdp, round0dp, round1dp, round2dp, round3dp, createCacheKey, COORD
 // Weather utilities
 export { getWeatherMessage } from './lib/utils/weatherMessages';
 // Weather services
-export { fetchMetNoLocationForecast, fetchMetNoMarineSeries, fetchOpenMeteoMarineSeries, fetchWorldTides } from './lib/services/weatherService';
+export { fetchMetNoLocationForecast, fetchMetNoMarineSeries, fetchOpenMeteoMarineSeries, fetchWorldTides, getFullWeather, fetchOpenMeteoAirPollen, fetchMetNoOceanForecast, fetchStormglassMarine, fetchStormglassTides, fetchStormglassAstronomy, fetchStormglassBio, fetchOpenMeteoWeather, fetchMarineForUserSpots } from './lib/services/weatherService';
 export type { WorldTidesResponse } from './lib/services/weatherService';
+// Moon/Astro services
+export { getMoonSunData } from './lib/astro/moonService';
+export type { MoonSunData } from './lib/astro/moonService';
 // Weather monitoring
 export { weatherMetrics, monitoredFetch } from './lib/monitoring/weatherMetrics';
 // Supabase query utilities
