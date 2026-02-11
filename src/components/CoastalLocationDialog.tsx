@@ -1,4 +1,5 @@
 import React, { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { usePlacesAutocompleteNew as usePlacesAutocomplete, getGeocode, getLatLng } from '../lib/hooks/usePlacesAutocompleteNew';
 import { loadGoogleMapsAPI } from '../lib/googleMapsLazy';
 import { getCurrentPosition, GeolocationException } from '../lib/capacitor/geolocation';
@@ -524,10 +525,12 @@ const CoastalLocationDialog: React.FC<CoastalLocationDialogProps> = ({
 
   if (!open) return null;
 
-  return (
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
       <div
-        className="bg-white text-gray-900 shadow-xl rounded-lg w-[min(92vw,48rem)] p-6"
+        className="bg-white text-gray-900 shadow-xl rounded-lg w-[min(92vw,48rem)] p-6 max-h-[90vh] overflow-y-auto"
         style={{ zIndex: 10000 }}
         onClick={(e) => e.stopPropagation()}
         ref={dialogRef}
@@ -689,7 +692,8 @@ const CoastalLocationDialog: React.FC<CoastalLocationDialogProps> = ({
           .pac-container { display: none !important; }
         `}</style>
       ) : null}
-    </div>
+    </div>,
+    document.body
   );
 };
 
