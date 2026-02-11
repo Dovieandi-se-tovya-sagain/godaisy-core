@@ -59,7 +59,7 @@ export { getWeatherMessage } from './lib/utils/weatherMessages';
 export { fetchMetNoLocationForecast, fetchMetNoMarineSeries, fetchOpenMeteoMarineSeries, fetchWorldTides } from './lib/services/weatherService';
 export type { WorldTidesResponse } from './lib/services/weatherService';
 // Weather monitoring
-export { weatherMetrics } from './lib/monitoring/weatherMetrics';
+export { weatherMetrics, monitoredFetch } from './lib/monitoring/weatherMetrics';
 // Supabase query utilities
 export { queryWithTiming, timedParallelQueries } from './lib/supabase/queryWithTiming';
 // Tide utilities
