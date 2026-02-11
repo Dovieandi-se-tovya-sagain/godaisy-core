@@ -526,7 +526,7 @@ const CoastalLocationDialog: React.FC<CoastalLocationDialogProps> = ({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50" onClick={onClose}>
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
       <div
         className="bg-white text-gray-900 shadow-xl rounded-lg w-[min(92vw,48rem)] p-6"
         style={{ zIndex: 10000 }}
