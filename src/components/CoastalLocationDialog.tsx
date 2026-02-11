@@ -526,10 +526,11 @@ const CoastalLocationDialog: React.FC<CoastalLocationDialogProps> = ({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-none">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50" onClick={onClose}>
       <div
-        className="force-light bg-base-100 text-base-content shadow-xl rounded-box w-[min(92vw,48rem)] p-6 pointer-events-auto !bg-white"
-        style={{ backgroundColor: 'white', opacity: 1, zIndex: 10000, backdropFilter: 'none' }}
+        className="bg-white text-gray-900 shadow-xl rounded-lg w-[min(92vw,48rem)] p-6"
+        style={{ zIndex: 10000 }}
+        onClick={(e) => e.stopPropagation()}
         ref={dialogRef}
         onKeyDown={onKeyDown}
         role="dialog"
