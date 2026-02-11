@@ -69,6 +69,9 @@ export type { TideExtreme } from './lib/tides/calculateTidePhase';
 export { rateLimiter, RateLimitError, addRateLimitHeaders } from './lib/utils/rate-limiter';
 // CORS
 export { applyCors } from './lib/utils/cors';
+// API middleware
+export { withRateLimit, withCors, withMiddleware, withSecureApi } from './lib/utils/apiMiddleware';
+export type { RateLimitPreset } from './lib/utils/apiMiddleware';
 // Findr grid utilities
 export { findNearestGridCellId } from './lib/findr/gridCellLookup';
 // UI utilities
