@@ -36,6 +36,7 @@
     "@capacitor/network": "^8.0.0",
     "@capacitor/preferences": "^8.0.0",
     "@capacitor/push-notifications": "^8.0.0",
+    "@capacitor/share": "^8.0.0",
     "@capacitor/splash-screen": "^8.0.0",
     "@capacitor/toast": "^8.0.0",
     "@googlemaps/js-api-loader": "^2.0.2",

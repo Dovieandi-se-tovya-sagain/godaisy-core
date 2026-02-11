@@ -90,6 +90,18 @@ export type { SavedLocation, LegacyUnifiedLocationRecord, LocationSlot } from '.
 // Capacitor/Platform utilities
 export { isNative, getPlatform } from './lib/capacitor/platform';
 
+// Capacitor geolocation
+export { getCurrentPosition, watchPosition, clearWatch, checkPermissions as checkGeolocationPermissions, requestPermissions as requestGeolocationPermissions, GeolocationException } from './lib/capacitor/geolocation';
+export type { Coordinates, Position, GeolocationError, WatchPositionOptions } from './lib/capacitor/geolocation';
+
+// Capacitor camera
+export { takePicture, selectFromGallery, checkPermissions as checkCameraPermissions, requestPermissions as requestCameraPermissions, CameraException } from './lib/capacitor/camera';
+export type { Photo, CameraOptions, CameraError } from './lib/capacitor/camera';
+
+// Capacitor notifications
+export { scheduleLocalNotification, cancelLocalNotification, cancelAllLocalNotifications, checkPermissions as checkNotificationPermissions, requestPermissions as requestNotificationPermissions, NotificationException } from './lib/capacitor/notifications';
+export type { LocalNotificationOptions, NotificationSchedule, PermissionStatus, NotificationError } from './lib/capacitor/notifications';
+
 // Date utilities
 export { getTodayIso } from './lib/date/today';
 
