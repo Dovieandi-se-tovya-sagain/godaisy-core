@@ -96,6 +96,7 @@ export { getTodayIso } from './lib/date/today';
 // Share utilities
 export { generateShareToken, getShareUrl } from './lib/share/shareToken';
 export type { FindrShareData } from './lib/share/shareToken';
+export { shareText, shareUrl, canShare } from './lib/capacitor/share';
 
 // Components
 export { default as SEO } from './components/SEO';
