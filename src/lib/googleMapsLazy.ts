@@ -7,8 +7,10 @@
 
 import { setOptions, importLibrary } from '@googlemaps/js-api-loader';
 
-// Get API key at module level so Next.js can inline it at build time
-const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '';
+// Read API key at runtime (not module level) so consuming apps can provide it via their own .env
+function getGoogleMapsApiKey(): string {
+  return process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '';
+}
 
 let optionsSet = false;
 let loadPromise: Promise<void> | null = null;
@@ -21,7 +23,7 @@ function ensureOptionsSet(): void {
   if (optionsSet) return;
 
   setOptions({
-    key: GOOGLE_MAPS_API_KEY,
+    key: getGoogleMapsApiKey(),
     v: 'weekly',
   });
   optionsSet = true;
@@ -46,11 +48,12 @@ export function loadGoogleMapsAPI(): Promise<void> {
   }
 
   // Start loading
-  console.log('🔍 Google Maps API key check:', GOOGLE_MAPS_API_KEY ? 'Found' : 'Missing');
+  const apiKey = getGoogleMapsApiKey();
+  console.log('🔍 Google Maps API key check:', apiKey ? 'Found' : 'Missing');
 
-  if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY === 'your_google_maps_api_key') {
+  if (!apiKey || apiKey === 'your_google_maps_api_key') {
     console.error('❌ Google Maps API key missing or not configured');
-    console.error('Key value:', GOOGLE_MAPS_API_KEY || '(empty)');
+    console.error('Key value:', apiKey || '(empty)');
     return Promise.reject(new Error('Google Maps API key is not configured. Please set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in .env.local'));
   }
 
