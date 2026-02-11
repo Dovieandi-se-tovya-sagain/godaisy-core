@@ -85,6 +85,8 @@ export type { DatabaseRow } from './lib/multiLocation/apiHelpers';
 
 // Types
 export type * from './types';
+// Weather value exports (functions from types/weather.ts not covered by `export type *`)
+export { mergeMarineWind } from './types/weather';
 export type { SavedLocation, LegacyUnifiedLocationRecord, LocationSlot } from './types/multiLocation';
 
 // Capacitor/Platform utilities
