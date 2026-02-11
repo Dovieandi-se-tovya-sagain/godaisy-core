@@ -1,10 +1,9 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { usePlacesAutocompleteNew as usePlacesAutocomplete, getGeocode, getLatLng } from '../lib/hooks/usePlacesAutocompleteNew';
-import dynamic from 'next/dynamic.js';
 import { loadGoogleMapsAPI } from '../lib/googleMapsLazy';
 import { getCurrentPosition, GeolocationException } from '../lib/capacitor/geolocation';
 
-const MapPicker = dynamic(() => import('./MapPicker'), { ssr: false });
+const MapPicker = lazy(() => import('./MapPicker'));
 
 // Remove complex inferred types to avoid mismatches with library typings
 
@@ -650,7 +649,9 @@ const CoastalLocationDialog: React.FC<CoastalLocationDialogProps> = ({
 
         {showMapPicker ? (
           <div className="mt-3 rounded-box overflow-hidden ring-1 ring-base-300/60">
-            <MapPicker homeLocation={homeLocation || undefined} onSelect={handleMapSelect} />
+            <Suspense fallback={<div className="flex items-center justify-center h-64"><span className="loading loading-spinner loading-lg"></span></div>}>
+              <MapPicker homeLocation={homeLocation || undefined} onSelect={handleMapSelect} />
+            </Suspense>
           </div>
         ) : null}
 
