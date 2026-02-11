@@ -8,8 +8,10 @@
 import { setOptions, importLibrary } from '@googlemaps/js-api-loader';
 
 // Read API key at runtime (not module level) so consuming apps can provide it via their own .env
+// Use indirect access to prevent tsup/esbuild from inlining the value at build time
 function getGoogleMapsApiKey(): string {
-  return process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '';
+  const env = process['env'];
+  return env['NEXT_PUBLIC_GOOGLE_MAPS_API_KEY'] || '';
 }
 
 let optionsSet = false;
