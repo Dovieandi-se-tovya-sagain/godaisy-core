@@ -102,6 +102,10 @@ export type { Photo, CameraOptions, CameraError } from './lib/capacitor/camera';
 export { scheduleLocalNotification, cancelLocalNotification, cancelAllLocalNotifications, checkPermissions as checkNotificationPermissions, requestPermissions as requestNotificationPermissions, NotificationException } from './lib/capacitor/notifications';
 export type { LocalNotificationOptions, NotificationSchedule, PermissionStatus, NotificationError } from './lib/capacitor/notifications';
 
+// Offline utilities
+export { getCachedCatchHistory, cacheCatchHistory, addCatchToCache, updateCatchInCache, clearCatchHistoryCache, getCatchHistoryCacheStats, catchHistoryApi } from './lib/offline/catchHistory';
+export type { CachedCatch, CatchHistoryCache } from './lib/offline/catchHistory';
+
 // Date utilities
 export { getTodayIso } from './lib/date/today';
 
