@@ -112,6 +112,9 @@ export type { CachedCatch, CatchHistoryCache } from './lib/offline/catchHistory'
 export { clarityFromKd490, clarityFromChlorophyll, combinedClarity, calculateWaterClarity, interpretClarity, chlorophyllToWaterClarityIndex } from './lib/utils/waterClarity';
 export type { WaterClarityData } from './lib/utils/waterClarity';
 
+// Weather icon mapping
+export { mapMetNoSymbolToIcon, getMetNoSymbolDescription } from './lib/utils/weatherIconMapping';
+
 // Date utilities
 export { getTodayIso } from './lib/date/today';
 
