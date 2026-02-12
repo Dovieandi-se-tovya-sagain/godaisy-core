@@ -56,8 +56,11 @@ export { roundNdp, round0dp, round1dp, round2dp, round3dp, createCacheKey, COORD
 // Weather utilities
 export { getWeatherMessage } from './lib/utils/weatherMessages';
 // Weather services
-export { fetchMetNoLocationForecast, fetchMetNoMarineSeries, fetchOpenMeteoMarineSeries, fetchWorldTides, getFullWeather, fetchOpenMeteoAirPollen, fetchMetNoOceanForecast, fetchStormglassMarine, fetchStormglassTides, fetchStormglassAstronomy, fetchStormglassBio, fetchOpenMeteoWeather, fetchMarineForUserSpots } from './lib/services/weatherService';
+export { fetchMetNoLocationForecast, fetchMetNoMarineSeries, fetchOpenMeteoMarineSeries, fetchWorldTides, getFullWeather, fetchOpenMeteoAirPollen, fetchMetNoOceanForecast, fetchStormglassMarine, fetchStormglassTides, fetchStormglassAstronomy, fetchStormglassBio, fetchOpenMeteoWeather, fetchMarineForUserSpots, getAirPollution } from './lib/services/weatherService';
 export type { WorldTidesResponse } from './lib/services/weatherService';
+// Rectangle anchor utilities (ICES grid caching for marine/tide data)
+export { buildRectangleCacheKey, getRectangleAnchorForLocation, getRectangleDayKey } from './lib/weather/rectangleAnchors';
+export type { RectangleAnchor, IcesRectangleRow } from './lib/weather/rectangleAnchors';
 // Moon/Astro services
 export { getMoonSunData } from './lib/astro/moonService';
 export type { MoonSunData } from './lib/astro/moonService';
