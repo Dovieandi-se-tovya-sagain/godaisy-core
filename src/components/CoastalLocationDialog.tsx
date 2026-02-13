@@ -1,10 +1,10 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { usePlacesAutocompleteNew as usePlacesAutocomplete, getGeocode, getLatLng } from '../lib/hooks/usePlacesAutocompleteNew';
-import dynamic from 'next/dynamic';
 import { loadGoogleMapsAPI } from '../lib/googleMapsLazy';
 import { getCurrentPosition, GeolocationException } from '../lib/capacitor/geolocation';
 
-const MapPicker = dynamic(() => import('./MapPicker'), { ssr: false });
+const MapPicker = lazy(() => import('./MapPicker'));
 
 // Remove complex inferred types to avoid mismatches with library typings
 
@@ -525,11 +525,13 @@ const CoastalLocationDialog: React.FC<CoastalLocationDialogProps> = ({
 
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-none">
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div className="fixed inset-0 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 99999 }} onClick={onClose}>
       <div
-        className="force-light bg-base-100 text-base-content shadow-xl rounded-box w-[min(92vw,48rem)] p-6 pointer-events-auto !bg-white"
-        style={{ backgroundColor: 'white', opacity: 1, zIndex: 10000, backdropFilter: 'none' }}
+        className="bg-white text-gray-900 shadow-xl rounded-lg w-[min(92vw,48rem)] p-6 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
         ref={dialogRef}
         onKeyDown={onKeyDown}
         role="dialog"
@@ -649,7 +651,9 @@ const CoastalLocationDialog: React.FC<CoastalLocationDialogProps> = ({
 
         {showMapPicker ? (
           <div className="mt-3 rounded-box overflow-hidden ring-1 ring-base-300/60">
-            <MapPicker homeLocation={homeLocation || undefined} onSelect={handleMapSelect} />
+            <Suspense fallback={<div className="flex items-center justify-center h-64"><span className="loading loading-spinner loading-lg"></span></div>}>
+              <MapPicker homeLocation={homeLocation || undefined} onSelect={handleMapSelect} />
+            </Suspense>
           </div>
         ) : null}
 
@@ -687,7 +691,8 @@ const CoastalLocationDialog: React.FC<CoastalLocationDialogProps> = ({
           .pac-container { display: none !important; }
         `}</style>
       ) : null}
-    </div>
+    </div>,
+    document.body
   );
 };
 

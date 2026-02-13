@@ -1,8 +1,8 @@
 "use client";
 
 import React from 'react';
-import Image from 'next/image';
-import Link from 'next/link';
+import Image from 'next/image.js';
+import Link from 'next/link.js';
 import { useUserPreferences } from '../contexts/UserPreferencesContext';
 import { supabase } from '../lib/supabase/client';
 import { LanguageSelector } from './LanguageSelector';

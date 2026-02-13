@@ -308,7 +308,9 @@ export const addPushNotificationListener = async (
 
   // Return cleanup function
   return () => {
+    if (listener && typeof listener.remove === 'function') {
     listener.remove();
+  }
   };
 };
 
@@ -333,6 +335,8 @@ export const addPushNotificationActionListener = async (
 
   // Return cleanup function
   return () => {
+    if (listener && typeof listener.remove === 'function') {
     listener.remove();
+  }
   };
 };

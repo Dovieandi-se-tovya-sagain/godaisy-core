@@ -10,8 +10,8 @@
  * - Proper error handling and loading states
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { createClient } from '../lib/supabase/client';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { supabase as supabaseClient } from '../lib/supabase/client';
 
 export interface WeatherAlert {
   type: string;
@@ -94,8 +94,8 @@ export function useWeatherTasks(): UseWeatherTasksResult {
   // Store userId in ref for realtime callback
   const userIdRef = useRef<string | null>(null);
 
-  // Stable supabase client - useMemo ensures we don't recreate on every render
-  const supabase = useMemo(() => createClient(), []);
+  // Stable supabase client singleton
+  const supabase = supabaseClient;
 
   // Update ref when userId changes
   useEffect(() => {

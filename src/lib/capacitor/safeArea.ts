@@ -62,7 +62,9 @@ export async function initSafeArea(): Promise<void> {
       applyInsets(data.insets);
     });
 
-    cleanupListener = () => listener.remove();
+    if (listener && typeof listener.remove === 'function') {
+    listener.remove();
+  }
     initialized = true;
     console.log('[SafeArea] Initialized successfully');
   } catch (error) {

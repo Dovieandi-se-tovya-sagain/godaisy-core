@@ -212,8 +212,7 @@ type RemoteUpsertResult =
 
 async function upsertRemoteLocationBySlot(input: UpdateLocationBySlotInput): Promise<RemoteUpsertResult> {
   // Ensure session is fresh before making request (fixes SameSite=Lax cookie issues after OAuth)
-  const { createClient } = await import('../lib/supabase/client');
-  const supabase = createClient();
+  const { supabase } = await import('../lib/supabase/client');
   await supabase.auth.getSession();
 
   const res = await fetch('/api/user/location', {

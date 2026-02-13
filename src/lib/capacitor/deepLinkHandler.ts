@@ -14,7 +14,7 @@
 
 import { App, URLOpenListenerEvent } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { createClient } from '../supabase/client';
+import { supabase } from '../supabase/client';
 
 const isNative = Capacitor.isNativePlatform();
 
@@ -114,7 +114,6 @@ async function handleAuthCallback(url: URL): Promise<DeepLinkResult> {
     };
   }
 
-  const supabase = createClient();
 
   try {
     // PKCE flow: exchange code for session
@@ -182,7 +181,6 @@ async function handleMagicLink(url: URL): Promise<DeepLinkResult> {
   const type = url.searchParams.get('type');
   const code = url.searchParams.get('code');
 
-  const supabase = createClient();
 
   try {
     // Handle token_hash style links

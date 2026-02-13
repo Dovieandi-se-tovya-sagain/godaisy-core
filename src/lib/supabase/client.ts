@@ -26,6 +26,9 @@
 // Re-export for backward compatibility
 export { createClient, createDataClient } from './dataClient';
 
-// Legacy singleton - will use old env vars if they exist
-import { createClient as createLegacyClient } from './dataClient';
-export const supabase = createLegacyClient();
+// Legacy singleton - uses createDataClient to avoid deprecation warning
+import { createDataClient as createSingleton } from './dataClient';
+export const supabase = createSingleton({
+  url: process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+});

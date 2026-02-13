@@ -14,7 +14,7 @@
  * ```
  */
 
-import Head from 'next/head';
+import Head from 'next/head.js';
 
 // Determine current app and base URL
 function getAppConfig() {

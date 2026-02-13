@@ -2,7 +2,8 @@ import { Temporal } from '@js-temporal/polyfill';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseServerClient } from '../supabase/serverClient';
 import { round0dp } from '../utils/coordinates';
-import { getMoonTimes, getTimes, getMoonIllumination } from 'suncalc';
+import suncalc from 'suncalc';
+const { getMoonTimes, getTimes, getMoonIllumination } = suncalc;
 
 export interface MoonSunData {
   latBucket: number;

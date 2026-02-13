@@ -1,0 +1,176 @@
+name: FINDR Copernicus ingestion (twice daily)
+
+permissions:
+  contents: read
+  issues: write
+
+on:
+  schedule:
+    - cron: '0 3,15 * * *'  # Twice daily: 03:00 and 15:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: findr-copernicus-ingest
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  ingest:
+    runs-on: ubuntu-24.04
+    if: ${{ github.repository == 'Dovieandi-se-tovya-sagain/godaisy-core' }}
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "botocore>=1.40.46"
+          pip install copernicusmarine xarray fsspec s3fs zarr numpy netCDF4 dask pandas
+
+      - name: Cache Copernicus Marine CLI state
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.copernicusmarine
+            ~/.config/copernicusmarine
+            ~/.cache/copernicusmarine
+          key: cmems-${{ runner.os }}-v1
+
+      - name: Copernicus CLI login (non-interactive) and warmup
+        env:
+          COPERNICUS_USERNAME: ${{ secrets.COPERNICUS_USERNAME }}
+          COPERNICUS_PASSWORD: ${{ secrets.COPERNICUS_PASSWORD }}
+        run: |
+          copernicusmarine login --username "$COPERNICUS_USERNAME" --password "$COPERNICUS_PASSWORD" || true
+          # Warm-up: light catalogue hit so STAC is cached
+          copernicusmarine products --limit 1 || true
+
+      - name: Run Copernicus data ingestion (with retry)
+        id: ingest
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          COPERNICUS_USERNAME: ${{ secrets.COPERNICUS_USERNAME }}
+          COPERNICUS_PASSWORD: ${{ secrets.COPERNICUS_PASSWORD }}
+          FINDR_CONDITIONS_DELAY_MS: '200'
+        run: |
+          npx tsx scripts/ingestion/ingest-copernicus-data.ts || {
+            echo 'First attempt failed, retrying in 30s...'
+            sleep 30
+            npx tsx scripts/ingestion/ingest-copernicus-data.ts
+          }
+
+      - name: Verify data was ingested
+        id: verify
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          npx tsx scripts/ingestion/verify-database-status.ts
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmems-ingest-logs-${{ github.run_id }}
+          path: |
+            **/*.log
+            copernicus-*.json
+            run-*.txt
+          if-no-files-found: ignore
+
+      - name: Create GitHub Issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = '🚨 Copernicus Data Ingestion Failed';
+            const body = `## Copernicus Data Ingestion Failure
+
+            The scheduled Copernicus data ingestion workflow failed.
+
+            **Workflow Run**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            **Time**: ${new Date().toISOString()}
+
+            ### Possible Causes:
+            - Copernicus API credentials expired
+            - Network issues
+            - API rate limiting
+            - Data validation failure
+
+            ### Impact:
+            - \`findr_conditions_latest\` table may be empty or stale
+            - Predictions will show reduced accuracy or outdated data
+
+            ### Actions Required:
+            1. Check workflow logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            2. Verify Copernicus credentials in GitHub Secrets
+            3. Manually trigger workflow if needed
+            4. Check Supabase table for data freshness`;
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'copernicus-ingestion-failure'
+            });
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['bug', 'copernicus-ingestion-failure', 'automated']
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issues.data[0].number,
+                body: `Another failure occurred at ${new Date().toISOString()}\n\nWorkflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+              });
+            }
+
+      - name: Close success issues
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'copernicus-ingestion-failure'
+            });
+            for (const issue of issues.data) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: '✅ Copernicus ingestion is now working. Closing this issue.'
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed'
+              });
+            }

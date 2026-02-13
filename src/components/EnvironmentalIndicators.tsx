@@ -3,7 +3,7 @@ import PollenWarning from './PollenWarning';
 import AirQualityWarning from './AirQualityWarning';
 import { PollenSummary } from '../utils/pollenUtils';
 import { AirQualitySummary } from '../utils/airQualityUtils';
-import Image from 'next/image';
+import Image from 'next/image.js';
 
 interface EnvironmentalIndicatorsProps {
   pollen?: PollenSummary;

@@ -1,7 +1,7 @@
 // components/SceneLayers.tsx
 import React from 'react';
 import WeatherAnimationLayer, { UnifiedWeatherData } from './WeatherAnimationLayer';
-import Image from 'next/image';
+import Image from 'next/image.js';
 
 type SceneLayersProps = {
   /** Background image URL (your existing hero artwork) */

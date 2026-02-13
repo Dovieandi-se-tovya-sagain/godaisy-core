@@ -1,6 +1,7 @@
 // Contexts
 export { AuthProvider, useAuth, useRequireAuth } from './contexts/AuthContext';
 export { UnifiedLocationProvider, useUnifiedLocation } from './contexts/UnifiedLocationContext';
+export type { UnifiedLocationRecord } from './contexts/UnifiedLocationContext';
 export { LanguageProvider, useLanguage } from './contexts/LanguageContext';
 export { UserPreferencesProvider, useUserPreferences } from './contexts/UserPreferencesContext';
 
@@ -8,6 +9,8 @@ export { UserPreferencesProvider, useUserPreferences } from './contexts/UserPref
 export { authClient } from './lib/supabase/authClient';
 export { createDataClient } from './lib/supabase/dataClient';
 export type { DataClientConfig } from './lib/supabase/dataClient';
+export { getSupabaseServerClient } from './lib/supabase/serverClient';
+export { createServerSupabaseClient } from './lib/supabase/pages-api';
 
 // Hooks
 export { useOnlineStatus } from './hooks/useOnlineStatus';
@@ -49,9 +52,34 @@ export { default as CoastalLocationDialog, type BasicLocation } from './componen
 // TODO: Add more component exports as needed
 
 // Utilities
-export { roundNdp, round0dp, round1dp, round2dp, createCacheKey, COORDINATE_PRECISION, CACHE_DURATION_MS } from './lib/utils/coordinates';
+export { roundNdp, round0dp, round1dp, round2dp, round3dp, createCacheKey, COORDINATE_PRECISION, CACHE_DURATION_MS } from './lib/utils/coordinates';
 // Weather utilities
 export { getWeatherMessage } from './lib/utils/weatherMessages';
+// Weather services
+export { fetchMetNoLocationForecast, fetchMetNoMarineSeries, fetchOpenMeteoMarineSeries, fetchWorldTides, getFullWeather, fetchOpenMeteoAirPollen, fetchMetNoOceanForecast, fetchStormglassMarine, fetchStormglassTides, fetchStormglassAstronomy, fetchStormglassBio, fetchOpenMeteoWeather, fetchMarineForUserSpots, getAirPollution } from './lib/services/weatherService';
+export type { WorldTidesResponse } from './lib/services/weatherService';
+// Rectangle anchor utilities (ICES grid caching for marine/tide data)
+export { buildRectangleCacheKey, getRectangleAnchorForLocation, getRectangleDayKey } from './lib/weather/rectangleAnchors';
+export type { RectangleAnchor, IcesRectangleRow } from './lib/weather/rectangleAnchors';
+// Moon/Astro services
+export { getMoonSunData } from './lib/astro/moonService';
+export type { MoonSunData } from './lib/astro/moonService';
+// Weather monitoring
+export { weatherMetrics, monitoredFetch } from './lib/monitoring/weatherMetrics';
+// Supabase query utilities
+export { queryWithTiming, timedParallelQueries } from './lib/supabase/queryWithTiming';
+// Tide utilities
+export { calculateTidePhase } from './lib/tides/calculateTidePhase';
+export type { TideExtreme } from './lib/tides/calculateTidePhase';
+// Rate limiting
+export { rateLimiter, RateLimitError, addRateLimitHeaders } from './lib/utils/rate-limiter';
+// CORS
+export { applyCors } from './lib/utils/cors';
+// API middleware
+export { withRateLimit, withCors, withMiddleware, withSecureApi } from './lib/utils/apiMiddleware';
+export type { RateLimitPreset } from './lib/utils/apiMiddleware';
+// Findr grid utilities
+export { findNearestGridCellId } from './lib/findr/gridCellLookup';
 // UI utilities
 export { toast, showToast } from './lib/ui/toast';
 export type { ToastType, ToastOptions } from './lib/ui/toast';
@@ -60,15 +88,41 @@ export { generateBlurDataURL } from './lib/image/placeholder';
 export { compressForUpload } from './lib/image/compressForUpload';
 
 // Multi-location utilities
-export { toLegacyFormat } from './types/multiLocation';
-// TODO: Add more utility exports as needed
+export { toLegacyFormat, fromLegacyFormat } from './types/multiLocation';
+export { parseLocationsArray, buildLegacyHomeCoordinatesPayload } from './lib/multiLocation/apiHelpers';
+export type { DatabaseRow } from './lib/multiLocation/apiHelpers';
 
 // Types
 export type * from './types';
-export type { SavedLocation, LegacyUnifiedLocationRecord } from './types/multiLocation';
+// Weather value exports (functions from types/weather.ts not covered by `export type *`)
+export { mergeMarineWind } from './types/weather';
+export type { SavedLocation, LegacyUnifiedLocationRecord, LocationSlot } from './types/multiLocation';
 
 // Capacitor/Platform utilities
 export { isNative, getPlatform } from './lib/capacitor/platform';
+
+// Capacitor geolocation
+export { getCurrentPosition, watchPosition, clearWatch, checkPermissions as checkGeolocationPermissions, requestPermissions as requestGeolocationPermissions, GeolocationException } from './lib/capacitor/geolocation';
+export type { Coordinates, Position, GeolocationError, WatchPositionOptions } from './lib/capacitor/geolocation';
+
+// Capacitor camera
+export { takePicture, selectFromGallery, checkPermissions as checkCameraPermissions, requestPermissions as requestCameraPermissions, CameraException } from './lib/capacitor/camera';
+export type { Photo, CameraOptions, CameraError } from './lib/capacitor/camera';
+
+// Capacitor notifications
+export { scheduleLocalNotification, cancelLocalNotification, cancelAllLocalNotifications, checkPermissions as checkNotificationPermissions, requestPermissions as requestNotificationPermissions, NotificationException } from './lib/capacitor/notifications';
+export type { LocalNotificationOptions, NotificationSchedule, PermissionStatus, NotificationError } from './lib/capacitor/notifications';
+
+// Offline utilities
+export { getCachedCatchHistory, cacheCatchHistory, addCatchToCache, updateCatchInCache, clearCatchHistoryCache, getCatchHistoryCacheStats, catchHistoryApi } from './lib/offline/catchHistory';
+export type { CachedCatch, CatchHistoryCache } from './lib/offline/catchHistory';
+
+// Water clarity utilities
+export { clarityFromKd490, clarityFromChlorophyll, combinedClarity, calculateWaterClarity, interpretClarity, chlorophyllToWaterClarityIndex } from './lib/utils/waterClarity';
+export type { WaterClarityData } from './lib/utils/waterClarity';
+
+// Weather icon mapping
+export { mapMetNoSymbolToIcon, getMetNoSymbolDescription } from './lib/utils/weatherIconMapping';
 
 // Date utilities
 export { getTodayIso } from './lib/date/today';
@@ -76,6 +130,7 @@ export { getTodayIso } from './lib/date/today';
 // Share utilities
 export { generateShareToken, getShareUrl } from './lib/share/shareToken';
 export type { FindrShareData } from './lib/share/shareToken';
+export { shareText, shareUrl, canShare } from './lib/capacitor/share';
 
 // Components
 export { default as SEO } from './components/SEO';

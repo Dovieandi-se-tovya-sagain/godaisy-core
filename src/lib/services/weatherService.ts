@@ -470,7 +470,7 @@ async function fetchOpenMeteoMarineSeries(
       const variable = hourly.variables(index);
       if (!variable) return [] as number[];
       const values = variable.valuesArray();
-      return values ? Array.from(values) : [];
+      return values ? Array.from(values) as number[] : [];
     };
 
     const data: Record<OpenMeteoMarineVarId, number[]> = OPEN_METEO_MARINE_VARS.reduce((acc, key, idx) => {

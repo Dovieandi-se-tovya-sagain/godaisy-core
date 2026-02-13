@@ -5,7 +5,7 @@ import React from 'react';
 import BeaufortIcon from '../BeaufortIcon';
 import WindDirectionIcon from '../WindDirectionIcon';
 import { getWindMessage } from '../../utils/weatherLabels';
-import Image from 'next/image';
+import Image from 'next/image.js';
 import { TranslatedText } from '../translation/TranslatedFishCard';
 
 interface WindDataPoint {

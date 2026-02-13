@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useId, useRef, useState, useCallback } from 'react';
-import Link from 'next/link';
+import Link from 'next/link.js';
 import { X, Calendar, Clock, Bell, BellOff, Check, Cloud, Smartphone, Info } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 

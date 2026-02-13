@@ -2,7 +2,7 @@
 // Daily forecast table component extracted from my-new-weather.tsx
 
 import React from 'react';
-import Image from 'next/image';
+import Image from 'next/image.js';
 
 interface DailyForecastData {
   dateISO: string;

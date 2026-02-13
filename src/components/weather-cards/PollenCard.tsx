@@ -1,5 +1,5 @@
 import React from 'react';
-import Image from 'next/image';
+import Image from 'next/image.js';
 
 // Helper to get pollen icon based on index value
 const getPollenIcon = (index: number): string => {
