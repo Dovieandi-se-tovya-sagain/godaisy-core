@@ -63,7 +63,7 @@ jobs:
           copernicusmarine --version
           echo ""
           echo "=== Login ==="
-          copernicusmarine login --username "$COPERNICUS_USERNAME" --password "$COPERNICUS_PASSWORD"
+          yes | copernicusmarine login --username "$COPERNICUS_USERNAME" --password "$COPERNICUS_PASSWORD"
           echo ""
           echo "=== Warm-up catalogue ==="
           copernicusmarine products --limit 1 || true
