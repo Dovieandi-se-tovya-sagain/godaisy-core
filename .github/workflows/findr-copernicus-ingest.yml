@@ -54,14 +54,57 @@ jobs:
             ~/.cache/copernicusmarine
           key: cmems-${{ runner.os }}-v1
 
-      - name: Copernicus CLI login (non-interactive) and warmup
+      - name: Copernicus CLI login and version check
         env:
           COPERNICUS_USERNAME: ${{ secrets.COPERNICUS_USERNAME }}
           COPERNICUS_PASSWORD: ${{ secrets.COPERNICUS_PASSWORD }}
         run: |
-          copernicusmarine login --username "$COPERNICUS_USERNAME" --password "$COPERNICUS_PASSWORD" || true
-          # Warm-up: light catalogue hit so STAC is cached
+          echo "=== Copernicus Marine Toolbox version ==="
+          copernicusmarine --version
+          echo ""
+          echo "=== Login ==="
+          copernicusmarine login --username "$COPERNICUS_USERNAME" --password "$COPERNICUS_PASSWORD"
+          echo ""
+          echo "=== Warm-up catalogue ==="
           copernicusmarine products --limit 1 || true
+
+      - name: Smoke test - single CLI subset call
+        env:
+          COPERNICUSMARINE_SERVICE_USERNAME: ${{ secrets.COPERNICUS_USERNAME }}
+          COPERNICUSMARINE_SERVICE_PASSWORD: ${{ secrets.COPERNICUS_PASSWORD }}
+        run: |
+          echo "=== Testing copernicusmarine subset with known-good North Sea location ==="
+          YESTERDAY=$(date -d "yesterday" +%Y-%m-%d)
+          echo "Date: $YESTERDAY"
+          echo "Dataset: cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m"
+          echo "Location: 56.25N, 3.0E (North Sea)"
+          echo ""
+          copernicusmarine subset \
+            --dataset-id cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m \
+            --variable thetao \
+            --minimum-longitude 2.75 \
+            --maximum-longitude 3.25 \
+            --minimum-latitude 56.0 \
+            --maximum-latitude 56.5 \
+            --start-datetime "$YESTERDAY" \
+            --end-datetime "$YESTERDAY" \
+            --output-directory /tmp \
+            --output-filename smoke_test.nc \
+            --overwrite \
+            --disable-progress-bar
+          echo ""
+          echo "=== Smoke test result ==="
+          ls -la /tmp/smoke_test.nc || echo "ERROR: File not created!"
+          echo ""
+          echo "=== Parse with Python ==="
+          python3 -c "
+          import xarray as xr
+          ds = xr.open_dataset('/tmp/smoke_test.nc')
+          print('Variables:', list(ds.data_vars))
+          print('Dims:', dict(ds.dims))
+          for v in ds.data_vars:
+              print(f'  {v}: shape={ds[v].shape}, min={float(ds[v].min()):.3f}, max={float(ds[v].max()):.3f}')
+          "
 
       - name: Run Copernicus data ingestion (with retry)
         id: ingest
