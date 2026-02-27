@@ -3,15 +3,15 @@
 /**
  * Copernicus Marine Data Ingestion Script
  *
- * Fetches comprehensive Copernicus marine data (CMEMS) for ICES rectangles
- * within 30km of shore and populates the findr_conditions_snapshots table.
+ * Fetches comprehensive Copernicus marine data (CMEMS) for 0.25° coastal grid
+ * cells and populates the findr_conditions_snapshots table.
  *
- * STRATEGY: 30km Limit (Optimized)
- * - Focuses on 224 rectangles within 30km of shore (68.9% of total)
- * - Eliminates all known problem rectangles (Baltic Finnish Gulf)
- * - Expected success rate: 97-99% (vs 94-98% for all rectangles)
- * - Covers 95%+ of recreational fishing activity
- * - 31% fewer API calls, 33% faster processing
+ * STRATEGY: Coastal 0.25° Grid Cells
+ * - Uses rectangles_025deg_api table (global 0.25° grid, ~28 km cells)
+ * - Filters to is_coastal = true (coastal cells only)
+ * - Cell IDs use G025_ format (e.g. G025_N44W007)
+ * - Expected success rate: 97-99%
+ * - Covers all recreational fishing areas globally
  *
  * DATA COLLECTED:
  *
@@ -40,11 +40,11 @@
  *   COPERNICUS_PASSWORD - Copernicus Marine Service password (optional for now)
  *   SUPABASE_URL - Supabase project URL
  *   SUPABASE_SERVICE_ROLE_KEY - Supabase service role key
- *   FINDR_CONDITIONS_LIMIT - Optional: limit number of rectangles to process
- *   FINDR_CONDITIONS_DELAY_MS - Optional: delay between rectangle requests (default 500ms)
- *   FINDR_CONDITIONS_FRESHNESS_HOURS - Optional: skip rectangles with data fresher than N hours (default 12)
- *   FINDR_CONDITIONS_BATCH_SIZE - Optional: process N rectangles in parallel (default 5)
- *   FINDR_CONDITIONS_FORCE_REFRESH - Optional: force refresh all rectangles, ignoring freshness (default false)
+ *   FINDR_CONDITIONS_LIMIT - Optional: limit number of grid cells to process
+ *   FINDR_CONDITIONS_DELAY_MS - Optional: delay between grid cell requests (default 500ms)
+ *   FINDR_CONDITIONS_FRESHNESS_HOURS - Optional: skip cells with data fresher than N hours (default 24)
+ *   FINDR_CONDITIONS_BATCH_SIZE - Optional: process N grid cells in parallel (default 5)
+ *   FINDR_CONDITIONS_FORCE_REFRESH - Optional: force refresh all cells, ignoring freshness (default false)
  */
 
 import { config } from 'dotenv';
@@ -63,7 +63,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABAS
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
 const LIMIT = process.env.FINDR_CONDITIONS_LIMIT ? parseInt(process.env.FINDR_CONDITIONS_LIMIT) : undefined;
 const DELAY_MS = process.env.FINDR_CONDITIONS_DELAY_MS ? parseInt(process.env.FINDR_CONDITIONS_DELAY_MS) : 500;
-const FRESHNESS_HOURS = process.env.FINDR_CONDITIONS_FRESHNESS_HOURS ? parseInt(process.env.FINDR_CONDITIONS_FRESHNESS_HOURS) : 6;
+const FRESHNESS_HOURS = process.env.FINDR_CONDITIONS_FRESHNESS_HOURS ? parseInt(process.env.FINDR_CONDITIONS_FRESHNESS_HOURS) : 24;
 const BATCH_SIZE = process.env.FINDR_CONDITIONS_BATCH_SIZE ? parseInt(process.env.FINDR_CONDITIONS_BATCH_SIZE) : 5;
 const FORCE_REFRESH = process.env.FINDR_CONDITIONS_FORCE_REFRESH === 'true';
 
@@ -76,23 +76,88 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-/**
- * Coordinate overrides for specific rectangles
- *
- * Some rectangles have very little sea area or their center point falls on land.
- * For these cases, we hardcode specific coordinates that are guaranteed to be in
- * the sea and representative of the fishing conditions in that rectangle.
- *
- * Format: { rectangle_code: { lat, lon, reason } }
- */
-const COORDINATE_OVERRIDES: Record<string, { lat: number; lon: number; reason: string }> = {
-  '25E0': {
-    lat: 43.502371,
-    lon: -5.261184,
-    reason: 'Bay of Biscay - rectangle has very little sea area'
-  },
-  // Add more overrides here as needed
-};
+// ─── CMEMS Region Assignment ─────────────────────────────────────────────────
+// Determines which regional Copernicus model to query for a given lat/lon.
+// Regional models have higher resolution than GLOBAL; GLOBAL is the fallback.
+
+function getCmemsRegion(region: string, lat: number, lon: number): string {
+  const r = region.toLowerCase();
+
+  // Baltic Sea
+  if (
+    r.includes('finnish') || r.includes('swedish baltic') ||
+    r.includes('polish baltic') || r.includes('danish baltic') ||
+    r.includes('baltic')
+  ) return 'BAL';
+
+  // Mediterranean Sea
+  if (
+    r.includes('mediterranean') || r.includes('adriatic') ||
+    r.includes('italian') || r.includes('greek') ||
+    r.includes('turkish mediterranean') || r.includes('croatian') ||
+    r.includes('albanian') || r.includes('slovenian') ||
+    r.includes('montenegrin') || r.includes('french mediterranean') ||
+    r.includes('malta') || r.includes('cyprus') ||
+    r.includes('sicily') || r.includes('sardinia') ||
+    r.includes('corsica') || r.includes('mallorca') ||
+    r.includes('menorca') || r.includes('ibiza') ||
+    r.includes('crete') || r.includes('rhodes') ||
+    r.includes('ionian') || r.includes('aegean')
+  ) return 'MED';
+
+  // Black Sea
+  if (
+    r.includes('black sea') || r.includes('bulgarian') ||
+    r.includes('romanian') || r.includes('turkish black') ||
+    r.includes('ukrainian') || r.includes('georgian') ||
+    r.includes('crimea')
+  ) return 'BLK';
+
+  // Iberia-Biscay-Ireland (IBI)
+  if (
+    r.includes('portuguese') || r.includes('galician') ||
+    r.includes('bay of biscay') || r.includes('biscay') ||
+    r.includes('irish') || r.includes('ireland') ||
+    r.includes('celtic sea') || r.includes('cornwall') ||
+    r.includes('devon') || r.includes('bristol channel') ||
+    r.includes('pembrokeshire') || r.includes('cardigan') ||
+    r.includes('anglesey') || r.includes('wales') ||
+    r.includes('merseyside') || r.includes('lancashire') ||
+    r.includes('cumbria') || r.includes('hebrides') ||
+    r.includes('west of scotland')
+  ) return 'IBI';
+
+  // Northwest European Shelf (NWS)
+  if (
+    r.includes('north sea') || r.includes('english channel') ||
+    r.includes('channel') || r.includes('dutch') ||
+    r.includes('danish') || r.includes('norwegian') ||
+    r.includes('scottish') || r.includes('shetland') ||
+    r.includes('orkney') || r.includes('dogger') ||
+    r.includes('yorkshire') || r.includes('durham') ||
+    r.includes('northumberland') || r.includes('lincolnshire') ||
+    r.includes('norfolk') || r.includes('suffolk') ||
+    r.includes('essex') || r.includes('kent') ||
+    r.includes('sussex') || r.includes('hampshire') ||
+    r.includes('dorset') || r.includes('thames') ||
+    r.includes('belgian') || r.includes('german bight')
+  ) return 'NWS';
+
+  // Arctic
+  if (
+    r.includes('arctic') || r.includes('svalbard') ||
+    r.includes('barents') || r.includes('greenland') ||
+    lat > 66
+  ) return 'ARC';
+
+  // Geographic bounds fallback
+  if (lat >= 30 && lat <= 46 && lon >= -6 && lon <= 36) return 'MED';
+  if (lat >= 53 && lat <= 66 && lon >= 10 && lon <= 30) return 'BAL';
+  if (lat >= 48 && lat <= 63 && lon >= -12 && lon <= 13) return 'NWS';
+  if (lat >= 36 && lat <= 54 && lon >= -20 && lon <= -5) return 'IBI';
+
+  return 'GLO';
+}
 
 // Use real Copernicus client when credentials are available
 const USE_MOCK = !process.env.COPERNICUS_USERNAME || !process.env.COPERNICUS_PASSWORD;
@@ -109,12 +174,12 @@ function getProvider(region?: string): RealCopernicusProvider {
   return providerCache.get(key)!;
 }
 
-interface Rectangle {
-  rectangle_code: string;
+interface GridCell {
+  rectangle_code: string;  // G025_ cell ID (stored as rectangle_code in DB)
   center_lat: number;
   center_lon: number;
   region?: string;
-  cmems_region?: string;
+  cmems_region?: string;   // Computed at runtime from lat/lon
   distance_to_shore_km?: number;
   is_coastal?: boolean;
 }
@@ -289,32 +354,54 @@ function snapshotToRow(
 }
 
 /**
- * Ingest Copernicus data for a single rectangle
+ * Build a partial update object containing only non-null fields.
+ * Copernicus data is patchy — some cells return currents but no chlorophyll, etc.
+ * We never overwrite previously cached non-null values with nulls.
  */
-async function ingestRectangle(rectangle: Rectangle): Promise<boolean> {
-  const { rectangle_code, center_lat, center_lon, region, cmems_region } = rectangle;
+function buildNonNullUpdate(row: CopernicusUpdateRow): Record<string, unknown> {
+  const update: Record<string, unknown> = {};
+  // Always update captured_at to track when we last attempted this cell
+  update.captured_at = row.captured_at;
 
-  // Check for coordinate overrides
-  const override = COORDINATE_OVERRIDES[rectangle_code];
-  let lat = center_lat;
-  let lon = center_lon;
+  if (row.current_east_ms !== null) update.current_east_ms = row.current_east_ms;
+  if (row.current_north_ms !== null) update.current_north_ms = row.current_north_ms;
+  if (row.current_speed_ms !== null) update.current_speed_ms = row.current_speed_ms;
+  if (row.current_direction_deg !== null) update.current_direction_deg = row.current_direction_deg;
+  if (row.mixed_layer_depth_m !== null) update.mixed_layer_depth_m = row.mixed_layer_depth_m;
+  if (row.sea_surface_height_m !== null) update.sea_surface_height_m = row.sea_surface_height_m;
+  if (row.kd490 !== null) update.kd490 = row.kd490;
+  if (row.chlorophyll_mg_m3 !== null) update.chlorophyll_mg_m3 = row.chlorophyll_mg_m3;
+  if (row.dissolved_oxygen_mg_l !== null) update.dissolved_oxygen_mg_l = row.dissolved_oxygen_mg_l;
+  if (row.salinity_psu !== null) update.salinity_psu = row.salinity_psu;
+  if (row.sea_temp_c !== null) update.sea_temp_c = row.sea_temp_c;
+  if (row.nitrate_umol_l !== null) update.nitrate_umol_l = row.nitrate_umol_l;
+  if (row.phosphate_umol_l !== null) update.phosphate_umol_l = row.phosphate_umol_l;
+  if (row.zooplankton_mmol_m3 !== null) update.zooplankton_mmol_m3 = row.zooplankton_mmol_m3;
+  if (row.phytoplankton_mmol_m3 !== null) update.phytoplankton_mmol_m3 = row.phytoplankton_mmol_m3;
+  if (row.primary_production_mg_c_m3_day !== null) update.primary_production_mg_c_m3_day = row.primary_production_mg_c_m3_day;
+  if (row.wave_direction_deg !== null) update.wave_direction_deg = row.wave_direction_deg;
+  if (row.wave_period_s !== null) update.wave_period_s = row.wave_period_s;
+  if (row.wind_sea_height_m !== null) update.wind_sea_height_m = row.wind_sea_height_m;
+  if (row.swell_height_m !== null) update.swell_height_m = row.swell_height_m;
 
-  if (override) {
-    lat = override.lat;
-    lon = override.lon;
-    console.log(`📍 ${rectangle_code}: (${lat.toFixed(2)}, ${lon.toFixed(2)}) 🔧 OVERRIDE`);
-    console.log(`   Reason: ${override.reason}`);
-  } else {
-    // Validate default coordinates
-    if (center_lat == null || center_lon == null) {
-      console.log(`📍 ${rectangle_code}: ⚠️  Invalid coordinates (null)`);
-      return false;
-    }
-    console.log(`📍 ${rectangle_code}: (${lat.toFixed(2)}, ${lon.toFixed(2)})`);
+  return update;
+}
+
+/**
+ * Ingest Copernicus data for a single grid cell
+ */
+async function ingestGridCell(cell: GridCell): Promise<boolean> {
+  const { rectangle_code, center_lat, center_lon, cmems_region } = cell;
+
+  // Validate coordinates
+  if (center_lat == null || center_lon == null) {
+    console.log(`📍 ${rectangle_code}: ⚠️  Invalid coordinates (null)`);
+    return false;
   }
+  console.log(`📍 ${rectangle_code}: (${center_lat.toFixed(2)}, ${center_lon.toFixed(2)})`);
 
-  // Fetch Copernicus data using override or default coordinates
-  const snapshot = await fetchCopernicusData(lat, lon, cmems_region);
+  // Fetch Copernicus data
+  const snapshot = await fetchCopernicusData(center_lat, center_lon, cmems_region);
 
   if (!snapshot) {
     console.log(`   ❌ No Copernicus data available`);
@@ -324,7 +411,7 @@ async function ingestRectangle(rectangle: Rectangle): Promise<boolean> {
   // Convert to database row
   const row = snapshotToRow(rectangle_code, snapshot);
 
-  // Get the latest record for this rectangle
+  // Get the latest record for this cell
   const { data: latestRecord } = await supabase
     .from('findr_conditions_snapshots')
     .select('id, captured_at')
@@ -334,32 +421,13 @@ async function ingestRectangle(rectangle: Rectangle): Promise<boolean> {
     .single();
 
   if (latestRecord) {
-    // Update existing record with Copernicus data
+    // Update existing record — only overwrite non-null fields to preserve cached data
+    const nonNullUpdate = buildNonNullUpdate(row);
+    const fieldsUpdated = Object.keys(nonNullUpdate).length - 1; // minus captured_at
+
     const { error } = await supabase
       .from('findr_conditions_snapshots')
-      .update({
-        current_east_ms: row.current_east_ms,
-        current_north_ms: row.current_north_ms,
-        current_speed_ms: row.current_speed_ms,
-        current_direction_deg: row.current_direction_deg,
-        mixed_layer_depth_m: row.mixed_layer_depth_m,
-        sea_surface_height_m: row.sea_surface_height_m,
-        kd490: row.kd490,
-        // Biogeochemical (bio-band scoring)
-        chlorophyll_mg_m3: row.chlorophyll_mg_m3,
-        dissolved_oxygen_mg_l: row.dissolved_oxygen_mg_l,
-        salinity_psu: row.salinity_psu,
-        sea_temp_c: row.sea_temp_c,
-        nitrate_umol_l: row.nitrate_umol_l,
-        phosphate_umol_l: row.phosphate_umol_l,
-        zooplankton_mmol_m3: row.zooplankton_mmol_m3,
-        phytoplankton_mmol_m3: row.phytoplankton_mmol_m3,
-        primary_production_mg_c_m3_day: row.primary_production_mg_c_m3_day,
-        wave_direction_deg: row.wave_direction_deg,
-        wave_period_s: row.wave_period_s,
-        wind_sea_height_m: row.wind_sea_height_m,
-        swell_height_m: row.swell_height_m,
-      })
+      .update(nonNullUpdate)
       .eq('id', latestRecord.id);
 
     if (error) {
@@ -367,9 +435,9 @@ async function ingestRectangle(rectangle: Rectangle): Promise<boolean> {
       return false;
     }
 
-    console.log(`   ✅ Updated (current: ${row.current_speed_ms?.toFixed(2) ?? 'null'} m/s, temp: ${row.sea_temp_c?.toFixed(1) ?? 'null'}°C, chl: ${row.chlorophyll_mg_m3?.toFixed(2) ?? 'null'} mg/m³, O₂: ${row.dissolved_oxygen_mg_l?.toFixed(1) ?? 'null'} mg/L, sal: ${row.salinity_psu?.toFixed(1) ?? 'null'} PSU)`);
+    console.log(`   ✅ Updated ${fieldsUpdated} fields (current: ${row.current_speed_ms?.toFixed(2) ?? 'null'} m/s, temp: ${row.sea_temp_c?.toFixed(1) ?? 'null'}°C, chl: ${row.chlorophyll_mg_m3?.toFixed(2) ?? 'null'} mg/m³)`);
   } else {
-    // No existing record, insert new snapshot
+    // No existing record, insert full snapshot (nulls are fine for first insert)
     const { error } = await supabase
       .from('findr_conditions_snapshots')
       .insert(row);
@@ -379,7 +447,7 @@ async function ingestRectangle(rectangle: Rectangle): Promise<boolean> {
       return false;
     }
 
-    console.log(`   ✅ Inserted (current: ${row.current_speed_ms?.toFixed(2) ?? 'null'} m/s, temp: ${row.sea_temp_c?.toFixed(1) ?? 'null'}°C, chl: ${row.chlorophyll_mg_m3?.toFixed(2) ?? 'null'} mg/m³, O₂: ${row.dissolved_oxygen_mg_l?.toFixed(1) ?? 'null'} mg/L, sal: ${row.salinity_psu?.toFixed(1) ?? 'null'} PSU)`);
+    console.log(`   ✅ Inserted (current: ${row.current_speed_ms?.toFixed(2) ?? 'null'} m/s, temp: ${row.sea_temp_c?.toFixed(1) ?? 'null'}°C, chl: ${row.chlorophyll_mg_m3?.toFixed(2) ?? 'null'} mg/m³)`);
   }
 
   return true;
@@ -400,89 +468,72 @@ async function main() {
     console.log('✅ Using REAL Copernicus Marine Service API\n');
   }
 
-  // Fetch only coastal fishing zones (<10km from shore)
-  // Optimized strategy: focus on core recreational fishing areas
-  // Expected: 104 rectangles (46% of full set, 54% reduction in API calls)
-  console.log('📥 Fetching ICES rectangles (coastal fishing zones <10km)...');
+  // Fetch coastal 0.25° grid cells from rectangles_025deg_api
+  console.log('📥 Fetching coastal grid cells (0.25° grid, is_coastal = true)...');
 
-  // Fetch only rectangles marked as coastal fishing zones
-  const { data: rectangles, error } = await supabase
-    .from('ices_rectangles')
-    .select('rectangle_code, center_lat, center_lon, region, cmems_region, distance_to_shore_km, is_coastal, is_coastal_fishing_zone')
-    .eq('is_coastal_fishing_zone', true)
+  const { data: rawCells, error } = await supabase
+    .from('rectangles_025deg_api')
+    .select('rectangle_code, center_lat, center_lon, region, distance_to_shore_km, is_coastal')
+    .eq('is_coastal', true)
     .order('rectangle_code');
 
-
-
-  if (error || !rectangles) {
-    console.error('❌ Failed to fetch rectangles:', error);
+  if (error || !rawCells) {
+    console.error('❌ Failed to fetch grid cells:', error);
     process.exit(1);
   }
 
-  // Get distance-to-shore information
-  const { data: distanceData } = await supabase
-    .from('ices_coastal_samples_staging')
-    .select('rectangle_code, distance_to_shore_km, is_coastal');
-
-  const distanceMap = new Map(
-    distanceData?.map(d => [d.rectangle_code, {
-      distance: d.distance_to_shore_km || 0,
-      isCoastal: d.is_coastal
-    }]) || []
-  );
-
-  // Enrich rectangles with distance data and sort (closest to shore first)
-  // Closest-first ensures the best fishing rectangles get processed even if the run
-  // is limited or times out. Furthest-from-shore rectangles are lowest priority.
-  const enrichedRectangles = rectangles
+  // Compute CMEMS region for each cell and sort closest-to-shore first.
+  // Closest-first ensures the best fishing cells get processed even if the run
+  // is limited or times out. Furthest-from-shore cells are lowest priority.
+  const enrichedCells: GridCell[] = rawCells
     .map(r => ({
       ...r,
-      distance_to_shore_km: distanceMap.get(r.rectangle_code)?.distance || r.distance_to_shore_km || 0,
-      is_coastal: distanceMap.get(r.rectangle_code)?.isCoastal || r.is_coastal || false,
+      distance_to_shore_km: r.distance_to_shore_km || 0,
+      cmems_region: getCmemsRegion(r.region || '', r.center_lat, r.center_lon),
     }))
-    .sort((a, b) => a.distance_to_shore_km - b.distance_to_shore_km);
+    .sort((a, b) => (a.distance_to_shore_km || 0) - (b.distance_to_shore_km || 0));
 
-  const rectanglesToProcess = LIMIT ? enrichedRectangles.slice(0, LIMIT) : enrichedRectangles;
-  const totalRectangles = rectanglesToProcess.length;
-  const offshoreCount = rectanglesToProcess.filter(r => r.distance_to_shore_km > 10).length;
-  const nearshoreCount = rectanglesToProcess.filter(r => r.distance_to_shore_km >= 5 && r.distance_to_shore_km <= 10).length;
-  const coastalCount = rectanglesToProcess.filter(r => r.distance_to_shore_km < 5).length;
+  const rectanglesToProcess = LIMIT ? enrichedCells.slice(0, LIMIT) : enrichedCells;
+  const totalCells = rectanglesToProcess.length;
+  const offshoreCount = rectanglesToProcess.filter(r => (r.distance_to_shore_km || 0) > 10).length;
+  const nearshoreCount = rectanglesToProcess.filter(r => (r.distance_to_shore_km || 0) >= 5 && (r.distance_to_shore_km || 0) <= 10).length;
+  const coastalCount = rectanglesToProcess.filter(r => (r.distance_to_shore_km || 0) < 5).length;
 
-  console.log(`✅ Found ${rectangles.length} total rectangles`);
-  console.log(`✅ Processing ${totalRectangles} coastal rectangles (all ≤30km from shore):`);
+  console.log(`✅ Found ${rawCells.length} coastal grid cells`);
+  console.log(`✅ Processing ${totalCells} cells:`);
   console.log(`   ${offshoreCount} offshore (10-30km)`);
   console.log(`   ${nearshoreCount} nearshore (5-10km)`);
   console.log(`   ${coastalCount} coastal (<5km)`);
 
   if (LIMIT) {
-    console.log(`⚠️  Processing first ${LIMIT} rectangles only (FINDR_CONDITIONS_LIMIT set)`);
+    console.log(`⚠️  Processing first ${LIMIT} cells only (FINDR_CONDITIONS_LIMIT set)`);
   }
 
-  // Log first 5 rectangles for debugging
-  console.log(`\n📋 First ${Math.min(5, rectanglesToProcess.length)} rectangles to process:`);
+  // Log first 5 cells for debugging
+  console.log(`\n📋 First ${Math.min(5, rectanglesToProcess.length)} grid cells to process:`);
   for (const r of rectanglesToProcess.slice(0, 5)) {
     console.log(`   ${r.rectangle_code}: (${r.center_lat}, ${r.center_lon}) dist=${r.distance_to_shore_km}km region=${r.cmems_region || 'GLOBAL'}`);
   }
   console.log('');
 
-  // Group rectangles by CMEMS region for better provider reuse
-  const rectanglesByRegion = new Map<string, Rectangle[]>();
-  for (const rect of rectanglesToProcess) {
-    const region = rect.cmems_region || 'GLOBAL';
-    if (!rectanglesByRegion.has(region)) {
-      rectanglesByRegion.set(region, []);
+  // Group cells by CMEMS region for better provider reuse
+  const cellsByRegion = new Map<string, GridCell[]>();
+  for (const cell of rectanglesToProcess) {
+    const region = cell.cmems_region || 'GLOBAL';
+    if (!cellsByRegion.has(region)) {
+      cellsByRegion.set(region, []);
     }
-    rectanglesByRegion.get(region)!.push(rect);
+    cellsByRegion.get(region)!.push(cell);
   }
 
-  console.log(`📦 Grouped into ${rectanglesByRegion.size} regions:\n`);
-  for (const [region, rects] of rectanglesByRegion.entries()) {
-    console.log(`   ${region}: ${rects.length} rectangles`);
+  console.log(`📦 Grouped into ${cellsByRegion.size} regions:\n`);
+  for (const [region, cells] of cellsByRegion.entries()) {
+    console.log(`   ${region}: ${cells.length} cells`);
   }
   console.log('');
 
-  // Filter out rectangles with fresh data (incremental ingestion)
-  let rectanglesToIngest = rectanglesToProcess;
+  // Filter out cells with fresh data (incremental ingestion)
+  let cellsToIngest = rectanglesToProcess;
   let skippedCount = 0;
 
   if (!FORCE_REFRESH) {
@@ -491,49 +542,49 @@ async function main() {
     const freshnessThreshold = new Date();
     freshnessThreshold.setHours(freshnessThreshold.getHours() - FRESHNESS_HOURS);
 
-    // Fetch latest data timestamps for all rectangles
+    // Fetch latest data timestamps for all grid cells
     const { data: freshData } = await supabase
-      .from('findr_conditions_latest')
+      .from('grid_conditions_latest')
       .select('rectangle_code, captured_at')
       .gte('captured_at', freshnessThreshold.toISOString());
 
-    const freshRectangles = new Set(freshData?.map(d => d.rectangle_code) || []);
-    rectanglesToIngest = rectanglesToProcess.filter(r => !freshRectangles.has(r.rectangle_code));
-    skippedCount = rectanglesToProcess.length - rectanglesToIngest.length;
+    const freshCells = new Set(freshData?.map(d => d.rectangle_code) || []);
+    cellsToIngest = rectanglesToProcess.filter(r => !freshCells.has(r.rectangle_code));
+    skippedCount = rectanglesToProcess.length - cellsToIngest.length;
 
-    console.log(`✅ ${skippedCount} rectangles have fresh data (<${FRESHNESS_HOURS}h old)`);
-    console.log(`📥 ${rectanglesToIngest.length} rectangles need updates\n`);
+    console.log(`✅ ${skippedCount} cells have fresh data (<${FRESHNESS_HOURS}h old)`);
+    console.log(`📥 ${cellsToIngest.length} cells need updates\n`);
   } else {
-    console.log(`⚠️  FORCE_REFRESH enabled - processing all rectangles\n`);
+    console.log(`⚠️  FORCE_REFRESH enabled - processing all cells\n`);
   }
 
-  // Regroup rectangles by region after freshness filtering
-  const rectanglesByRegionFiltered = new Map<string, Rectangle[]>();
-  for (const rect of rectanglesToIngest) {
-    const region = rect.cmems_region || 'GLOBAL';
-    if (!rectanglesByRegionFiltered.has(region)) {
-      rectanglesByRegionFiltered.set(region, []);
+  // Regroup cells by region after freshness filtering
+  const cellsByRegionFiltered = new Map<string, GridCell[]>();
+  for (const cell of cellsToIngest) {
+    const region = cell.cmems_region || 'GLOBAL';
+    if (!cellsByRegionFiltered.has(region)) {
+      cellsByRegionFiltered.set(region, []);
     }
-    rectanglesByRegionFiltered.get(region)!.push(rect);
+    cellsByRegionFiltered.get(region)!.push(cell);
   }
 
-  // Process rectangles region by region with parallelization
+  // Process cells region by region with parallelization
   let successCount = 0;
   let failCount = 0;
   let processedCount = 0;
   const startTime = Date.now();
-  const totalToProcess = rectanglesToIngest.length;
+  const totalToProcess = cellsToIngest.length;
 
-  for (const [region, rectangles] of rectanglesByRegionFiltered.entries()) {
-    console.log(`\n🌊 Processing ${rectangles.length} rectangles in ${region} region (batch size: ${BATCH_SIZE})...\n`);
+  for (const [region, cells] of cellsByRegionFiltered.entries()) {
+    console.log(`\n🌊 Processing ${cells.length} cells in ${region} region (batch size: ${BATCH_SIZE})...\n`);
 
     // Process in batches for parallelization
-    for (let i = 0; i < rectangles.length; i += BATCH_SIZE) {
-      const batch = rectangles.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < cells.length; i += BATCH_SIZE) {
+      const batch = cells.slice(i, i + BATCH_SIZE);
 
       // Process batch in parallel
       const results = await Promise.all(
-        batch.map(rectangle => ingestRectangle(rectangle))
+        batch.map(cell => ingestGridCell(cell))
       );
 
       // Count successes and failures
@@ -547,15 +598,15 @@ async function main() {
 
       processedCount += batch.length;
 
-      // Progress indicator every 10 rectangles
+      // Progress indicator every 10 cells
       if (processedCount % 10 === 0 || processedCount === totalToProcess) {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
         const rate = (processedCount / (Date.now() - startTime) * 1000).toFixed(1);
-        console.log(`\n📊 Progress: ${processedCount}/${totalToProcess} (${rate} rect/sec, ${elapsed}s elapsed)\n`);
+        console.log(`\n📊 Progress: ${processedCount}/${totalToProcess} (${rate} cells/sec, ${elapsed}s elapsed)\n`);
       }
 
       // Delay between batches to avoid rate limiting
-      if (i + BATCH_SIZE < rectangles.length) {
+      if (i + BATCH_SIZE < cells.length) {
         await new Promise(resolve => setTimeout(resolve, DELAY_MS));
       }
     }
@@ -568,19 +619,19 @@ async function main() {
   console.log('\n╔══════════════════════════════════════════════════════════════════╗');
   console.log('║                      INGESTION COMPLETE                          ║');
   console.log('╚══════════════════════════════════════════════════════════════════╝\n');
-  console.log(`✅ Success: ${successCount}/${totalToProcess} rectangles processed`);
-  console.log(`❌ Failed: ${failCount}/${totalToProcess} rectangles`);
-  console.log(`⏭️  Skipped: ${skippedCount} rectangles (fresh data <${FRESHNESS_HOURS}h old)`);
+  console.log(`✅ Success: ${successCount}/${totalToProcess} grid cells processed`);
+  console.log(`❌ Failed: ${failCount}/${totalToProcess} grid cells`);
+  console.log(`⏭️  Skipped: ${skippedCount} cells (fresh data <${FRESHNESS_HOURS}h old)`);
   console.log(`📊 Success rate: ${totalToProcess > 0 ? ((successCount / totalToProcess) * 100).toFixed(1) : '0.0'}% (97-99% expected)`);
-  console.log(`⏱️  Total time: ${totalTime}s (${avgRate} rectangles/sec)`);
-  console.log(`\n🎯 30km Strategy Benefits:`);
-  console.log(`   ✅ ${totalRectangles} rectangles (within 30km of shore)`);
-  console.log(`   ✅ Focuses on fishing-relevant areas (95%+ of activity)`);
-  console.log(`   ✅ Eliminates Baltic Finnish Gulf problems`);
-  console.log(`   ✅ Higher success rate than full 325-rectangle coverage`);
+  console.log(`⏱️  Total time: ${totalTime}s (${avgRate} cells/sec)`);
+  console.log(`\n🎯 0.25° Grid Strategy:`);
+  console.log(`   ✅ ${totalCells} coastal grid cells (is_coastal = true)`);
+  console.log(`   ✅ Global coverage (G025_ cell IDs)`);
+  console.log(`   ✅ Non-null merge: cached data preserved when Copernicus returns partial results`);
+  console.log(`   ✅ 24h freshness window minimizes redundant API calls`);
   console.log(`\n💡 Next Steps:`);
   console.log(`   1. Verify data: npx tsx scripts/ingestion/verify-database-status.ts`);
-  console.log(`   2. Set up daily cron in GitHub Actions (.github/workflows/findr-copernicus-ingest.yml)`);
+  console.log(`   2. Check grid_conditions_latest in Supabase for G025_ entries`);
 
   if (USE_MOCK) {
     console.log(`\n⚠️  IMPORTANT: Currently using MOCK data`);

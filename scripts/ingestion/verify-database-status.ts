@@ -148,7 +148,52 @@ async function checkDatabase() {
     allChecksPass = false;
   }
 
-  // Check 4: Verify migration is recorded
+  // Check 4: Grid conditions table (0.25° grid cells)
+  console.log('📊 CHECK 4: Grid Conditions Table (G025_ cells)');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+  try {
+    const { data: gridData, error: gridError } = await supabase
+      .from('grid_conditions_latest')
+      .select('rectangle_code, current_speed_ms, kd490, chlorophyll_mg_m3, captured_at')
+      .not('current_speed_ms', 'is', null)
+      .order('captured_at', { ascending: false })
+      .limit(5);
+
+    if (gridError) {
+      if (gridError.message.includes('does not exist') || gridError.code === '42P01') {
+        console.warn('⚠️  Table grid_conditions_latest not found');
+        console.warn('   Run ingestion to populate G025_ grid cell data\n');
+      } else {
+        console.error('❌ FAIL: Could not query grid_conditions_latest');
+        console.error('   Error:', gridError.message);
+        allChecksPass = false;
+      }
+    } else if (!gridData || gridData.length === 0) {
+      console.warn('⚠️  No G025_ grid cell data found yet');
+      console.warn('   Run: npx tsx scripts/ingestion/ingest-copernicus-data.ts\n');
+    } else {
+      const { count } = await supabase
+        .from('grid_conditions_latest')
+        .select('*', { count: 'exact', head: true })
+        .not('current_speed_ms', 'is', null);
+
+      console.log(`✅ PASS: grid_conditions_latest has data (${count ?? '?'} cells with current data)\n`);
+
+      console.log('🌊 Latest G025_ Data:');
+      gridData.forEach(row => {
+        const age = row.captured_at ? Math.round((Date.now() - new Date(row.captured_at).getTime()) / 3600000) : '?';
+        console.log(`   ${row.rectangle_code}: current=${row.current_speed_ms?.toFixed(3) || 'null'} m/s, kd490=${row.kd490?.toFixed(3) || 'null'}, chl=${row.chlorophyll_mg_m3?.toFixed(2) || 'null'} (${age}h ago)`);
+      });
+      console.log('');
+    }
+  } catch (err) {
+    console.error('❌ FAIL: Error checking grid conditions table');
+    console.error('   ', err);
+    allChecksPass = false;
+  }
+
+  // Check 5: Verify migration is recorded
   console.log('📊 CHECK 4: Migration History');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
