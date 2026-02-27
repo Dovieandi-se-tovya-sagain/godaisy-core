@@ -184,36 +184,41 @@ interface GridCell {
   is_coastal?: boolean;
 }
 
-interface CopernicusUpdateRow {
-  rectangle_code: string;
-  captured_at: string;
-  // Ocean dynamics
-  current_east_ms: number | null;
-  current_north_ms: number | null;
-  current_speed_ms: number | null;
-  current_direction_deg: number | null;
-  mixed_layer_depth_m: number | null;
-  sea_surface_height_m: number | null;
-  // Water clarity
-  kd490: number | null;
-  // Biogeochemical (bio-band scoring)
-  chlorophyll_mg_m3: number | null;
-  dissolved_oxygen_mg_l: number | null;
+/**
+ * Row format for grid_conditions_latest table.
+ *
+ * Column mapping from Copernicus snapshot → grid_conditions_latest:
+ *   temperatureSurface       → surface_temperature_c
+ *   dissolvedOxygenSurface   → oxygen_mg_l  (mmol/m³ → mg/L)
+ *   salinitySurface          → salinity_psu
+ *   chlorophyllSurface       → chlorophyll_mg_m3
+ *   nitrateSurface           → nitrate_umol_l
+ *   phosphateSurface         → phosphate_umol_l
+ *   kd490Surface             → kd490
+ *   waveDirection            → wave_direction_deg
+ *   wavePeriod               → wave_period_s
+ *   windSeaHeight            → wave_height_m  (best available wave height)
+ *
+ * Not available in grid_conditions_latest (stored in sources metadata):
+ *   current_speed_ms, current_direction_deg, current_east_ms, current_north_ms
+ *   mixed_layer_depth_m, sea_surface_height_m
+ *   zooplankton, phytoplankton, primary_production
+ *   swell_height_m (separate from wave_height)
+ */
+interface GridConditionsRow {
+  cell_id: string;
+  collected_at: string;
+  surface_temperature_c: number | null;
   salinity_psu: number | null;
-  // Temperature
-  sea_temp_c: number | null;
-  // Nutrients
+  oxygen_mg_l: number | null;
+  chlorophyll_mg_m3: number | null;
   nitrate_umol_l: number | null;
   phosphate_umol_l: number | null;
-  // Food chain
-  zooplankton_mmol_m3: number | null;
-  phytoplankton_mmol_m3: number | null;
-  primary_production_mg_c_m3_day: number | null;
-  // Waves
+  kd490: number | null;
   wave_direction_deg: number | null;
   wave_period_s: number | null;
-  wind_sea_height_m: number | null;
-  swell_height_m: number | null;
+  wave_height_m: number | null;
+  sources: string[];
 }
 
 /**
@@ -310,46 +315,29 @@ function hasValidSnapshot(snapshot: CopernicusMarineSnapshot): boolean {
 }
 
 /**
- * Convert Copernicus snapshot to database row
+ * Convert Copernicus snapshot to grid_conditions_latest row
  */
 function snapshotToRow(
-  rectangleCode: string,
-  snapshot: CopernicusMarineSnapshot
-): CopernicusUpdateRow {
-  const capturedAt = new Date().toISOString();
-
+  cellId: string,
+  snapshot: CopernicusMarineSnapshot,
+  cmemsRegion?: string
+): GridConditionsRow {
   return {
-    rectangle_code: rectangleCode,
-    captured_at: capturedAt,
-    // Ocean dynamics
-    current_east_ms: snapshot.currentEastSurface ?? null,
-    current_north_ms: snapshot.currentNorthSurface ?? null,
-    current_speed_ms: snapshot.currentSpeedSurface ?? null,
-    current_direction_deg: snapshot.currentDirectionSurface ?? null,
-    mixed_layer_depth_m: snapshot.mixedLayerDepth ?? null,
-    sea_surface_height_m: snapshot.seaSurfaceHeight ?? null,
-    // Water clarity
-    kd490: snapshot.kd490Surface ?? null,
-    // Biogeochemical (bio-band scoring)
-    chlorophyll_mg_m3: snapshot.chlorophyllSurface ?? null,
-    dissolved_oxygen_mg_l: snapshot.dissolvedOxygenSurface != null
+    cell_id: cellId,
+    collected_at: new Date().toISOString(),
+    surface_temperature_c: snapshot.temperatureSurface ?? null,
+    salinity_psu: snapshot.salinitySurface ?? null,
+    oxygen_mg_l: snapshot.dissolvedOxygenSurface != null
       ? snapshot.dissolvedOxygenSurface * 0.032  // mmol/m³ → mg/L (O₂ MW = 32 g/mol)
       : null,
-    salinity_psu: snapshot.salinitySurface ?? null,
-    // Temperature
-    sea_temp_c: snapshot.temperatureSurface ?? null,
-    // Nutrients
+    chlorophyll_mg_m3: snapshot.chlorophyllSurface ?? null,
     nitrate_umol_l: snapshot.nitrateSurface ?? null,
     phosphate_umol_l: snapshot.phosphateSurface ?? null,
-    // Food chain
-    zooplankton_mmol_m3: snapshot.zooplanktonSurface ?? null,
-    phytoplankton_mmol_m3: snapshot.phytoplanktonSurface ?? null,
-    primary_production_mg_c_m3_day: snapshot.primaryProductionSurface ?? null,
-    // Waves
+    kd490: snapshot.kd490Surface ?? null,
     wave_direction_deg: snapshot.waveDirection ?? null,
     wave_period_s: snapshot.wavePeriod ?? null,
-    wind_sea_height_m: snapshot.windSeaHeight ?? null,
-    swell_height_m: snapshot.swellHeight ?? null,
+    wave_height_m: snapshot.windSeaHeight ?? snapshot.swellHeight ?? null,
+    sources: [`copernicus-${cmemsRegion || 'GLO'}`],
   };
 }
 
@@ -358,37 +346,29 @@ function snapshotToRow(
  * Copernicus data is patchy — some cells return currents but no chlorophyll, etc.
  * We never overwrite previously cached non-null values with nulls.
  */
-function buildNonNullUpdate(row: CopernicusUpdateRow): Record<string, unknown> {
+function buildNonNullUpdate(row: GridConditionsRow): Record<string, unknown> {
   const update: Record<string, unknown> = {};
-  // Always update captured_at to track when we last attempted this cell
-  update.captured_at = row.captured_at;
+  // Always update collected_at and sources to track when we last attempted this cell
+  update.collected_at = row.collected_at;
+  update.sources = row.sources;
 
-  if (row.current_east_ms !== null) update.current_east_ms = row.current_east_ms;
-  if (row.current_north_ms !== null) update.current_north_ms = row.current_north_ms;
-  if (row.current_speed_ms !== null) update.current_speed_ms = row.current_speed_ms;
-  if (row.current_direction_deg !== null) update.current_direction_deg = row.current_direction_deg;
-  if (row.mixed_layer_depth_m !== null) update.mixed_layer_depth_m = row.mixed_layer_depth_m;
-  if (row.sea_surface_height_m !== null) update.sea_surface_height_m = row.sea_surface_height_m;
-  if (row.kd490 !== null) update.kd490 = row.kd490;
-  if (row.chlorophyll_mg_m3 !== null) update.chlorophyll_mg_m3 = row.chlorophyll_mg_m3;
-  if (row.dissolved_oxygen_mg_l !== null) update.dissolved_oxygen_mg_l = row.dissolved_oxygen_mg_l;
+  if (row.surface_temperature_c !== null) update.surface_temperature_c = row.surface_temperature_c;
   if (row.salinity_psu !== null) update.salinity_psu = row.salinity_psu;
-  if (row.sea_temp_c !== null) update.sea_temp_c = row.sea_temp_c;
+  if (row.oxygen_mg_l !== null) update.oxygen_mg_l = row.oxygen_mg_l;
+  if (row.chlorophyll_mg_m3 !== null) update.chlorophyll_mg_m3 = row.chlorophyll_mg_m3;
   if (row.nitrate_umol_l !== null) update.nitrate_umol_l = row.nitrate_umol_l;
   if (row.phosphate_umol_l !== null) update.phosphate_umol_l = row.phosphate_umol_l;
-  if (row.zooplankton_mmol_m3 !== null) update.zooplankton_mmol_m3 = row.zooplankton_mmol_m3;
-  if (row.phytoplankton_mmol_m3 !== null) update.phytoplankton_mmol_m3 = row.phytoplankton_mmol_m3;
-  if (row.primary_production_mg_c_m3_day !== null) update.primary_production_mg_c_m3_day = row.primary_production_mg_c_m3_day;
+  if (row.kd490 !== null) update.kd490 = row.kd490;
   if (row.wave_direction_deg !== null) update.wave_direction_deg = row.wave_direction_deg;
   if (row.wave_period_s !== null) update.wave_period_s = row.wave_period_s;
-  if (row.wind_sea_height_m !== null) update.wind_sea_height_m = row.wind_sea_height_m;
-  if (row.swell_height_m !== null) update.swell_height_m = row.swell_height_m;
+  if (row.wave_height_m !== null) update.wave_height_m = row.wave_height_m;
 
   return update;
 }
 
 /**
- * Ingest Copernicus data for a single grid cell
+ * Ingest Copernicus data for a single grid cell.
+ * Writes to grid_conditions_latest (cell_id column).
  */
 async function ingestGridCell(cell: GridCell): Promise<boolean> {
   const { rectangle_code, center_lat, center_lon, cmems_region } = cell;
@@ -409,37 +389,35 @@ async function ingestGridCell(cell: GridCell): Promise<boolean> {
   }
 
   // Convert to database row
-  const row = snapshotToRow(rectangle_code, snapshot);
+  const row = snapshotToRow(rectangle_code, snapshot, cmems_region);
 
-  // Get the latest record for this cell
-  const { data: latestRecord } = await supabase
-    .from('findr_conditions_snapshots')
-    .select('id, captured_at')
-    .eq('rectangle_code', rectangle_code)
-    .order('captured_at', { ascending: false })
-    .limit(1)
-    .single();
+  // Check if cell already has data
+  const { data: existing } = await supabase
+    .from('grid_conditions_latest')
+    .select('cell_id, collected_at')
+    .eq('cell_id', rectangle_code)
+    .maybeSingle();
 
-  if (latestRecord) {
+  if (existing) {
     // Update existing record — only overwrite non-null fields to preserve cached data
     const nonNullUpdate = buildNonNullUpdate(row);
-    const fieldsUpdated = Object.keys(nonNullUpdate).length - 1; // minus captured_at
+    const fieldsUpdated = Object.keys(nonNullUpdate).length - 2; // minus collected_at + sources
 
     const { error } = await supabase
-      .from('findr_conditions_snapshots')
+      .from('grid_conditions_latest')
       .update(nonNullUpdate)
-      .eq('id', latestRecord.id);
+      .eq('cell_id', rectangle_code);
 
     if (error) {
       console.log(`   ❌ Update failed: ${error.message}`);
       return false;
     }
 
-    console.log(`   ✅ Updated ${fieldsUpdated} fields (current: ${row.current_speed_ms?.toFixed(2) ?? 'null'} m/s, temp: ${row.sea_temp_c?.toFixed(1) ?? 'null'}°C, chl: ${row.chlorophyll_mg_m3?.toFixed(2) ?? 'null'} mg/m³)`);
+    console.log(`   ✅ Updated ${fieldsUpdated} fields (temp: ${row.surface_temperature_c?.toFixed(1) ?? 'null'}°C, chl: ${row.chlorophyll_mg_m3?.toFixed(2) ?? 'null'} mg/m³, kd490: ${row.kd490?.toFixed(3) ?? 'null'})`);
   } else {
-    // No existing record, insert full snapshot (nulls are fine for first insert)
+    // Insert new row (cell exists in grid_025deg but not yet in conditions)
     const { error } = await supabase
-      .from('findr_conditions_snapshots')
+      .from('grid_conditions_latest')
       .insert(row);
 
     if (error) {
@@ -447,7 +425,7 @@ async function ingestGridCell(cell: GridCell): Promise<boolean> {
       return false;
     }
 
-    console.log(`   ✅ Inserted (current: ${row.current_speed_ms?.toFixed(2) ?? 'null'} m/s, temp: ${row.sea_temp_c?.toFixed(1) ?? 'null'}°C, chl: ${row.chlorophyll_mg_m3?.toFixed(2) ?? 'null'} mg/m³)`);
+    console.log(`   ✅ Inserted (temp: ${row.surface_temperature_c?.toFixed(1) ?? 'null'}°C, chl: ${row.chlorophyll_mg_m3?.toFixed(2) ?? 'null'} mg/m³, kd490: ${row.kd490?.toFixed(3) ?? 'null'})`);
   }
 
   return true;
@@ -468,42 +446,78 @@ async function main() {
     console.log('✅ Using REAL Copernicus Marine Service API\n');
   }
 
-  // Fetch coastal 0.25° grid cells from rectangles_025deg_api
-  console.log('📥 Fetching coastal grid cells (0.25° grid, is_coastal = true)...');
+  // Fetch coastal 0.25° grid cells.
+  // Cell source: grid_conditions_latest (2,139 known coastal cells, column: cell_id)
+  // Coordinates: rectangles_025deg_api, with fallback to parsing from cell ID
+  // Write target: findr_conditions_snapshots (column: rectangle_code)
+  console.log('📥 Fetching coastal grid cells from grid_conditions_latest...');
 
-  const { data: rawCells, error } = await supabase
-    .from('rectangles_025deg_api')
-    .select('rectangle_code, center_lat, center_lon, region, distance_to_shore_km, is_coastal')
-    .eq('is_coastal', true)
-    .order('rectangle_code');
+  const { data: knownCells, error: knownError } = await supabase
+    .from('grid_conditions_latest')
+    .select('cell_id')
+    .like('cell_id', 'G025_%');
 
-  if (error || !rawCells) {
-    console.error('❌ Failed to fetch grid cells:', error);
+  if (knownError || !knownCells) {
+    console.error('❌ Failed to fetch grid cells from grid_conditions_latest:', knownError);
     process.exit(1);
   }
 
-  // Compute CMEMS region for each cell and sort closest-to-shore first.
-  // Closest-first ensures the best fishing cells get processed even if the run
-  // is limited or times out. Furthest-from-shore cells are lowest priority.
-  const enrichedCells: GridCell[] = rawCells
-    .map(r => ({
-      ...r,
-      distance_to_shore_km: r.distance_to_shore_km || 0,
-      cmems_region: getCmemsRegion(r.region || '', r.center_lat, r.center_lon),
-    }))
-    .sort((a, b) => (a.distance_to_shore_km || 0) - (b.distance_to_shore_km || 0));
+  // Deduplicate cell IDs
+  const uniqueCellIds = [...new Set(knownCells.map(c => c.cell_id))];
+  console.log(`   Found ${uniqueCellIds.length} unique G025_ cells`);
+
+  // Get coordinates from rectangles_025deg_api
+  // Supabase .in() has a practical limit, so batch if needed
+  const coordMap = new Map<string, { lat: number; lon: number }>();
+  const BATCH = 500;
+  for (let i = 0; i < uniqueCellIds.length; i += BATCH) {
+    const batch = uniqueCellIds.slice(i, i + BATCH);
+    const { data: coords } = await supabase
+      .from('rectangles_025deg_api')
+      .select('rectangle_code, center_lat, center_lon')
+      .in('rectangle_code', batch);
+    if (coords) {
+      for (const c of coords) {
+        coordMap.set(c.rectangle_code, { lat: c.center_lat, lon: c.center_lon });
+      }
+    }
+  }
+  console.log(`   Got coordinates for ${coordMap.size} cells from rectangles_025deg_api`);
+
+  // Parse coordinates from cell ID for cells not in rectangles_025deg_api
+  // Format: G025_N44W007 → lat ≈ 44.125, lon ≈ -7.125
+  function parseCellCenter(cellId: string): { lat: number; lon: number } | null {
+    const match = cellId.match(/^G025_([NS])(\d{2})([EW])(\d{3})$/);
+    if (!match) return null;
+    const [, latH, latD, lonH, lonD] = match;
+    return {
+      lat: (latH === 'N' ? 1 : -1) * (parseInt(latD, 10) + 0.125),
+      lon: (lonH === 'E' ? 1 : -1) * (parseInt(lonD, 10) + 0.125),
+    };
+  }
+
+  // Build enriched cell list with CMEMS region
+  const enrichedCells: GridCell[] = [];
+  let parsedCount = 0;
+  for (const cellId of uniqueCellIds) {
+    const coords = coordMap.get(cellId) || parseCellCenter(cellId);
+    if (!coords) continue;
+    if (!coordMap.has(cellId)) parsedCount++;
+    enrichedCells.push({
+      rectangle_code: cellId,
+      center_lat: coords.lat,
+      center_lon: coords.lon,
+      cmems_region: getCmemsRegion('', coords.lat, coords.lon),
+    });
+  }
+  if (parsedCount > 0) {
+    console.log(`   Parsed ${parsedCount} cell coordinates from cell IDs (not in rectangles_025deg_api)`)
+  }
 
   const rectanglesToProcess = LIMIT ? enrichedCells.slice(0, LIMIT) : enrichedCells;
   const totalCells = rectanglesToProcess.length;
-  const offshoreCount = rectanglesToProcess.filter(r => (r.distance_to_shore_km || 0) > 10).length;
-  const nearshoreCount = rectanglesToProcess.filter(r => (r.distance_to_shore_km || 0) >= 5 && (r.distance_to_shore_km || 0) <= 10).length;
-  const coastalCount = rectanglesToProcess.filter(r => (r.distance_to_shore_km || 0) < 5).length;
 
-  console.log(`✅ Found ${rawCells.length} coastal grid cells`);
-  console.log(`✅ Processing ${totalCells} cells:`);
-  console.log(`   ${offshoreCount} offshore (10-30km)`);
-  console.log(`   ${nearshoreCount} nearshore (5-10km)`);
-  console.log(`   ${coastalCount} coastal (<5km)`);
+  console.log(`✅ Built ${totalCells} grid cells to process`);
 
   if (LIMIT) {
     console.log(`⚠️  Processing first ${LIMIT} cells only (FINDR_CONDITIONS_LIMIT set)`);
@@ -512,7 +526,7 @@ async function main() {
   // Log first 5 cells for debugging
   console.log(`\n📋 First ${Math.min(5, rectanglesToProcess.length)} grid cells to process:`);
   for (const r of rectanglesToProcess.slice(0, 5)) {
-    console.log(`   ${r.rectangle_code}: (${r.center_lat}, ${r.center_lon}) dist=${r.distance_to_shore_km}km region=${r.cmems_region || 'GLOBAL'}`);
+    console.log(`   ${r.rectangle_code}: (${r.center_lat}, ${r.center_lon}) region=${r.cmems_region || 'GLOBAL'}`);
   }
   console.log('');
 
@@ -542,13 +556,13 @@ async function main() {
     const freshnessThreshold = new Date();
     freshnessThreshold.setHours(freshnessThreshold.getHours() - FRESHNESS_HOURS);
 
-    // Fetch latest data timestamps for all grid cells
+    // Fetch latest data timestamps from grid_conditions_latest
     const { data: freshData } = await supabase
       .from('grid_conditions_latest')
-      .select('rectangle_code, captured_at')
-      .gte('captured_at', freshnessThreshold.toISOString());
+      .select('cell_id, collected_at')
+      .gte('collected_at', freshnessThreshold.toISOString());
 
-    const freshCells = new Set(freshData?.map(d => d.rectangle_code) || []);
+    const freshCells = new Set(freshData?.map(d => d.cell_id) || []);
     cellsToIngest = rectanglesToProcess.filter(r => !freshCells.has(r.rectangle_code));
     skippedCount = rectanglesToProcess.length - cellsToIngest.length;
 

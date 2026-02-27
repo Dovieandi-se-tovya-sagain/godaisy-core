@@ -155,9 +155,9 @@ async function checkDatabase() {
   try {
     const { data: gridData, error: gridError } = await supabase
       .from('grid_conditions_latest')
-      .select('rectangle_code, current_speed_ms, kd490, chlorophyll_mg_m3, captured_at')
-      .not('current_speed_ms', 'is', null)
-      .order('captured_at', { ascending: false })
+      .select('cell_id, surface_temperature_c, kd490, chlorophyll_mg_m3, collected_at')
+      .like('cell_id', 'G025_%')
+      .order('collected_at', { ascending: false })
       .limit(5);
 
     if (gridError) {
@@ -165,7 +165,7 @@ async function checkDatabase() {
         console.warn('⚠️  Table grid_conditions_latest not found');
         console.warn('   Run ingestion to populate G025_ grid cell data\n');
       } else {
-        console.error('❌ FAIL: Could not query grid_conditions_latest');
+        console.error('❌ FAIL: Could not query G025_ data from grid_conditions_latest');
         console.error('   Error:', gridError.message);
         allChecksPass = false;
       }
@@ -176,14 +176,14 @@ async function checkDatabase() {
       const { count } = await supabase
         .from('grid_conditions_latest')
         .select('*', { count: 'exact', head: true })
-        .not('current_speed_ms', 'is', null);
+        .like('cell_id', 'G025_%');
 
-      console.log(`✅ PASS: grid_conditions_latest has data (${count ?? '?'} cells with current data)\n`);
+      console.log(`✅ PASS: grid_conditions_latest has G025_ data (${count ?? '?'} cells)\n`);
 
       console.log('🌊 Latest G025_ Data:');
       gridData.forEach(row => {
-        const age = row.captured_at ? Math.round((Date.now() - new Date(row.captured_at).getTime()) / 3600000) : '?';
-        console.log(`   ${row.rectangle_code}: current=${row.current_speed_ms?.toFixed(3) || 'null'} m/s, kd490=${row.kd490?.toFixed(3) || 'null'}, chl=${row.chlorophyll_mg_m3?.toFixed(2) || 'null'} (${age}h ago)`);
+        const age = row.collected_at ? Math.round((Date.now() - new Date(row.collected_at).getTime()) / 3600000) : '?';
+        console.log(`   ${row.cell_id}: temp=${row.surface_temperature_c?.toFixed(1) || 'null'}°C, kd490=${row.kd490?.toFixed(3) || 'null'}, chl=${row.chlorophyll_mg_m3?.toFixed(2) || 'null'} (${age}h ago)`);
       });
       console.log('');
     }
@@ -194,7 +194,7 @@ async function checkDatabase() {
   }
 
   // Check 5: Verify migration is recorded
-  console.log('📊 CHECK 4: Migration History');
+  console.log('📊 CHECK 5: Migration History');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
   try {
