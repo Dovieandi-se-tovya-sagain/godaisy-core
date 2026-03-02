@@ -123,6 +123,27 @@ export function getWaterRegion(lat: number, lon: number): string {
  * findNearestGridCellId(40.7128, -74.0060) // Returns "G025_N41W074" (New York)
  * findNearestGridCellId(25.7617, -80.1918) // Returns "G025_N26W081" (Miami)
  */
+/**
+ * Parse a G025_ grid cell ID back to its center coordinates.
+ * Inverse of generateGridCellId.
+ *
+ * @param cellId Grid cell ID e.g. "G025_N00E048"
+ * @returns Center coordinates or null if the ID doesn't match the expected format
+ *
+ * @example
+ * parseGridCellCenter('G025_N00E048') // Returns { lat: 0.125, lon: 48.125 }
+ * parseGridCellCenter('G025_N41W074') // Returns { lat: 41.125, lon: -74.125 }
+ */
+export function parseGridCellCenter(cellId: string): { lat: number; lon: number } | null {
+  const match = cellId.match(/^G025_([NS])(\d{2})([EW])(\d{3})$/i);
+  if (!match) return null;
+  const [, latH, latD, lonH, lonD] = match;
+  return {
+    lat: (latH.toUpperCase() === 'N' ? 1 : -1) * (parseInt(latD, 10) + 0.125),
+    lon: (lonH.toUpperCase() === 'E' ? 1 : -1) * (parseInt(lonD, 10) + 0.125),
+  };
+}
+
 export function findNearestGridCellId(lat: number, lon: number): string {
   // Validate coordinates
   if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {

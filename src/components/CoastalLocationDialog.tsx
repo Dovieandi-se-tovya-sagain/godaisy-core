@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { usePlacesAutocompleteNew as usePlacesAutocomplete, getGeocode, getLatLng } from '../lib/hooks/usePlacesAutocompleteNew';
 import { loadGoogleMapsAPI } from '../lib/googleMapsLazy';
 import { getCurrentPosition, GeolocationException } from '../lib/capacitor/geolocation';
+import { parseGridCellCenter } from '../lib/findr/gridCellLookup';
 
 const MapPicker = lazy(() => import('./MapPicker'));
 
@@ -520,7 +521,26 @@ const CoastalLocationDialog: React.FC<CoastalLocationDialogProps> = ({
       }))
     : [];
 
-  const suggestionItems = useFallbackSearch ? fallbackSuggestions : googleSuggestions;
+  // Detect G025_ rectangle code input and create a synthetic suggestion
+  const rectangleMatch = parseGridCellCenter(value.trim().toUpperCase());
+  const rectangleSuggestion: SuggestionItem[] = rectangleMatch
+    ? [{
+        place_id: `grid-${value.trim().toUpperCase()}`,
+        description: `Grid cell ${value.trim().toUpperCase()}`,
+        structured_formatting: {
+          main_text: value.trim().toUpperCase(),
+          secondary_text: `Center: ${rectangleMatch.lat.toFixed(3)}\u00B0, ${rectangleMatch.lon.toFixed(3)}\u00B0`,
+        },
+        provider: 'fallback',
+        lat: rectangleMatch.lat,
+        lon: rectangleMatch.lon,
+      }]
+    : [];
+
+  const suggestionItems = [
+    ...rectangleSuggestion,
+    ...(useFallbackSearch ? fallbackSuggestions : googleSuggestions),
+  ];
   const refererBlocked = Boolean(autocompleteError && /referer/i.test(autocompleteError));
 
   if (!open) return null;
