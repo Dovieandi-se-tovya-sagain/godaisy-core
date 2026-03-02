@@ -403,6 +403,10 @@ export class RealCopernicusProvider implements CopernicusProvider {
       });
     }
 
+    // Split output path into directory + filename (CLI requires them separate)
+    const outputDir = path.dirname(outputFile);
+    const outputName = path.basename(outputFile);
+
     cmdArgs.push(
       '--minimum-longitude', lonMin.toString(),
       '--maximum-longitude', lonMax.toString(),
@@ -410,8 +414,10 @@ export class RealCopernicusProvider implements CopernicusProvider {
       '--maximum-latitude', latMax.toString(),
       '--start-datetime', startDate,
       '--end-datetime', endDate,
-      '--output-filename', outputFile,
-      '--overwrite'
+      '--output-directory', outputDir,
+      '--output-filename', outputName,
+      '--overwrite',
+      '--disable-progress-bar'
     );
 
     // Build command string with proper quoting for shell
@@ -419,30 +425,46 @@ export class RealCopernicusProvider implements CopernicusProvider {
       arg.toString().includes(' ') ? `"${arg}"` : arg
     ).join(' ')}`;
 
-    // Use shorter timeout for probes (15s) to fail fast and try global fallback
-    // Only use longer timeout if we know data exists
+    // CI environments need longer timeouts (cold STAC catalogue, auth, download)
+    // 90s for initial probe, 120s for larger downloads
     const isProbe = padding <= 0.25;
-    const timeoutMs = isProbe ? 15000 : 45000; // 15s for probe, 45s for confirmed downloads
+    const timeoutMs = isProbe ? 90000 : 120000;
 
-    const { stdout, stderr } = await execAsync(cmd, {
-      timeout: timeoutMs,
-      killSignal: 'SIGTERM', // Graceful termination
-      env: {
-        ...process.env,
-        PATH: `${process.env.HOME}/.local/bin:${process.env.PATH}`,
-        // Pass Copernicus credentials to CLI (using new naming convention)
-        COPERNICUSMARINE_SERVICE_USERNAME: process.env.COPERNICUS_USERNAME,
-        COPERNICUSMARINE_SERVICE_PASSWORD: process.env.COPERNICUS_PASSWORD,
-      },
-    });
+    try {
+      const { stdout, stderr } = await execAsync(cmd, {
+        timeout: timeoutMs,
+        killSignal: 'SIGTERM',
+        env: {
+          ...process.env,
+          PATH: `${process.env.HOME}/.local/bin:${process.env.PATH}`,
+          COPERNICUSMARINE_SERVICE_USERNAME: process.env.COPERNICUS_USERNAME,
+          COPERNICUSMARINE_SERVICE_PASSWORD: process.env.COPERNICUS_PASSWORD,
+        },
+      });
 
-    if (stderr && !stderr.includes('INFO') && !stderr.includes('Fetching')) {
-      console.error(`   ⚠️  CLI stderr: ${stderr.substring(0, 200)}`);
-      throw new Error(stderr);
-    }
+      // copernicusmarine outputs progress/info to stderr — only error on actual failures
+      if (stderr) {
+        const stderrLower = stderr.toLowerCase();
+        const hasError = stderrLower.includes('error') || stderrLower.includes('exception') || stderrLower.includes('traceback');
+        const isJustInfo = stderrLower.includes('info') || stderrLower.includes('fetching') || stderrLower.includes('downloaded');
+        if (hasError && !isJustInfo) {
+          console.error(`   ⚠️  CLI stderr: ${stderr.substring(0, 300)}`);
+          throw new Error(stderr.substring(0, 500));
+        }
+      }
 
-    if (stdout) {
-      console.log(`   ℹ️  CLI stdout: ${stdout.substring(0, 100)}`);
+      if (stdout) {
+        console.log(`   ℹ️  CLI stdout: ${stdout.substring(0, 100)}`);
+      }
+    } catch (execError: unknown) {
+      const errMsg = execError instanceof Error ? execError.message : String(execError);
+      const isTimeout = errMsg.includes('SIGTERM') || errMsg.includes('timeout') || errMsg.includes('killed');
+      if (isTimeout) {
+        throw new Error(`timeout after ${timeoutMs / 1000}s for ${datasetId}`);
+      }
+      // Log the actual CLI error for debugging
+      console.error(`   ❌ CLI failed for ${datasetId}: ${errMsg.substring(0, 300)}`);
+      throw execError;
     }
   }
 
