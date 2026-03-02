@@ -20,7 +20,7 @@ jobs:
   ingest:
     runs-on: ubuntu-24.04
     if: ${{ github.repository == 'Dovieandi-se-tovya-sagain/godaisy-core' }}
-    timeout-minutes: 120
+    timeout-minutes: 360
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -114,6 +114,7 @@ jobs:
           COPERNICUS_USERNAME: ${{ secrets.COPERNICUS_USERNAME }}
           COPERNICUS_PASSWORD: ${{ secrets.COPERNICUS_PASSWORD }}
           FINDR_CONDITIONS_DELAY_MS: '200'
+          FINDR_CONDITIONS_BATCH_SIZE: '10'
         run: |
           npx tsx scripts/ingestion/ingest-copernicus-data.ts || {
             echo 'First attempt failed, retrying in 30s...'
