@@ -45,6 +45,7 @@
  *   FINDR_CONDITIONS_FRESHNESS_HOURS - Optional: skip cells with data fresher than N hours (default 24)
  *   FINDR_CONDITIONS_BATCH_SIZE - Optional: process N grid cells in parallel (default 5)
  *   FINDR_CONDITIONS_FORCE_REFRESH - Optional: force refresh all cells, ignoring freshness (default false)
+ *   FINDR_CONDITIONS_REGION - Optional: only process cells in this CMEMS region (BAL, MED, BLK, IBI, NWS, ARC, GLO)
  */
 
 import { config } from 'dotenv';
@@ -66,6 +67,7 @@ const DELAY_MS = process.env.FINDR_CONDITIONS_DELAY_MS ? parseInt(process.env.FI
 const FRESHNESS_HOURS = process.env.FINDR_CONDITIONS_FRESHNESS_HOURS ? parseInt(process.env.FINDR_CONDITIONS_FRESHNESS_HOURS) : 24;
 const BATCH_SIZE = process.env.FINDR_CONDITIONS_BATCH_SIZE ? parseInt(process.env.FINDR_CONDITIONS_BATCH_SIZE) : 5;
 const FORCE_REFRESH = process.env.FINDR_CONDITIONS_FORCE_REFRESH === 'true';
+const REGION_FILTER = process.env.FINDR_CONDITIONS_REGION?.toUpperCase() || '';
 
 // Validate credentials
 if (!SUPABASE_URL || !SUPABASE_KEY) {
@@ -202,7 +204,6 @@ interface GridCell {
  * Not available in grid_conditions_latest (stored in sources metadata):
  *   current_speed_ms, current_direction_deg, current_east_ms, current_north_ms
  *   mixed_layer_depth_m, sea_surface_height_m
- *   zooplankton, phytoplankton, primary_production
  *   swell_height_m (separate from wave_height)
  */
 interface GridConditionsRow {
@@ -215,6 +216,9 @@ interface GridConditionsRow {
   nitrate_umol_l: number | null;
   phosphate_umol_l: number | null;
   kd490: number | null;
+  zooplankton_mmol_m3: number | null;
+  phytoplankton_mmol_m3: number | null;
+  primary_production_mg_c_m3_day: number | null;
   wave_direction_deg: number | null;
   wave_period_s: number | null;
   wave_height_m: number | null;
@@ -334,6 +338,9 @@ function snapshotToRow(
     nitrate_umol_l: snapshot.nitrateSurface ?? null,
     phosphate_umol_l: snapshot.phosphateSurface ?? null,
     kd490: snapshot.kd490Surface ?? null,
+    zooplankton_mmol_m3: snapshot.zooplanktonSurface ?? null,
+    phytoplankton_mmol_m3: snapshot.phytoplanktonSurface ?? null,
+    primary_production_mg_c_m3_day: snapshot.primaryProductionSurface ?? null,
     wave_direction_deg: snapshot.waveDirection ?? null,
     wave_period_s: snapshot.wavePeriod ?? null,
     wave_height_m: snapshot.windSeaHeight ?? snapshot.swellHeight ?? null,
@@ -359,6 +366,9 @@ function buildNonNullUpdate(row: GridConditionsRow): Record<string, unknown> {
   if (row.nitrate_umol_l !== null) update.nitrate_umol_l = row.nitrate_umol_l;
   if (row.phosphate_umol_l !== null) update.phosphate_umol_l = row.phosphate_umol_l;
   if (row.kd490 !== null) update.kd490 = row.kd490;
+  if (row.zooplankton_mmol_m3 !== null) update.zooplankton_mmol_m3 = row.zooplankton_mmol_m3;
+  if (row.phytoplankton_mmol_m3 !== null) update.phytoplankton_mmol_m3 = row.phytoplankton_mmol_m3;
+  if (row.primary_production_mg_c_m3_day !== null) update.primary_production_mg_c_m3_day = row.primary_production_mg_c_m3_day;
   if (row.wave_direction_deg !== null) update.wave_direction_deg = row.wave_direction_deg;
   if (row.wave_period_s !== null) update.wave_period_s = row.wave_period_s;
   if (row.wave_height_m !== null) update.wave_height_m = row.wave_height_m;
@@ -512,6 +522,15 @@ async function main() {
   }
   if (parsedCount > 0) {
     console.log(`   Parsed ${parsedCount} cell coordinates from cell IDs (not in rectangles_025deg_api)`)
+  }
+
+  // Filter by CMEMS region if specified (used by matrix workflow)
+  if (REGION_FILTER) {
+    const beforeCount = enrichedCells.length;
+    const filtered = enrichedCells.filter(c => c.cmems_region === REGION_FILTER);
+    console.log(`🌍 Region filter: ${REGION_FILTER} → ${filtered.length} of ${beforeCount} cells`);
+    enrichedCells.length = 0;
+    enrichedCells.push(...filtered);
   }
 
   const rectanglesToProcess = LIMIT ? enrichedCells.slice(0, LIMIT) : enrichedCells;
