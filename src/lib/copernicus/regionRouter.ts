@@ -10,6 +10,8 @@ export interface CopernicusDatasetConfig {
   salinity?: string;  // Separate salinity dataset (for Mediterranean)
   currents?: string;  // Separate currents dataset (for Mediterranean)
   biogeochemistry: string;
+  planktonFunctionalTypes?: string;  // PFT dataset for phytoplankton carbon (phyc)
+  zooplankton?: string;  // Plankton dataset for zooplankton carbon (zooc)
   transparency?: string;  // Satellite ocean color transparency (kd490)
   waves: string;
   region: string;
@@ -33,6 +35,8 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       return {
         physics: 'cmems_mod_bal_phy_anfc_P1D-m',
         biogeochemistry: 'cmems_mod_bal_bgc_anfc_P1D-m',
+        planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
+        zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
         transparency: 'cmems_obs-oc_bal_bgc-transp_nrt_l3-olci-300m_P1D',
         waves: 'cmems_mod_glo_wav_anfc_0.083deg_PT3H-i', // Baltic has no wave product, use GLO
         region: 'Baltic Sea',
@@ -42,6 +46,8 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       return {
         physics: 'cmems_mod_med_phy_anfc_4.2km_P1D-m', // Fixed: was 0.042deg-3D, now 4.2km
         biogeochemistry: 'cmems_mod_med_bgc-bio_anfc_4.2km_P1D-m', // Fixed: added -bio suffix, changed resolution
+        planktonFunctionalTypes: 'cmems_mod_med_bgc-pft_anfc_4.2km_P1D-m', // Med has its own PFT product
+        zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
         transparency: 'cmems_obs-oc_med_bgc-transp_nrt_l3-multi-1km_P1D', // NRT for current data (MY has ~1 week lag)
         waves: 'cmems_mod_glo_wav_anfc_0.083deg_PT3H-i', // Med has no wave product, use GLO
         region: 'Mediterranean Sea',
@@ -51,6 +57,8 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       return {
         physics: 'cmems_mod_blk_phy_anfc_2.5km_P1D-m',
         biogeochemistry: 'cmems_mod_blk_bgc_anfc_2.5km_P1D-m',
+        planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
+        zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
         transparency: 'cmems_obs-oc_blk_bgc-transp_nrt_l3-multi-1km_P1D',
         waves: 'cmems_mod_blk_wav_anfc_2.5km_PT1H-i',
         region: 'Black Sea',
@@ -60,6 +68,8 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       return {
         physics: 'cmems_mod_ibi_phy_anfc_0.027deg-3D_P1D-m',
         biogeochemistry: 'cmems_mod_ibi_bgc_anfc_0.027deg-3D_P1D-m',
+        planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
+        zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
         transparency: 'cmems_obs-oc_atl_bgc-transp_nrt_l3-multi-1km_P1D', // NRT for current data (MY has ~1 week lag)
         waves: 'cmems_mod_ibi_wav_anfc_0.027deg_PT1H-i', // Fixed: was 0.083deg_PT1H-m, now 0.027deg_PT1H-i
         region: 'Iberia-Biscay-Ireland',
@@ -71,6 +81,8 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
         physics: 'cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m', // Temperature dataset
         salinity: 'cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m', // Salinity dataset (split from physics)
         biogeochemistry: 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m',
+        planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
+        zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
         transparency: 'cmems_obs-oc_atl_bgc-transp_nrt_l3-multi-1km_P1D', // NRT for current data (MY has ~1 week lag)
         waves: 'cmems_mod_glo_wav_anfc_0.083deg_PT3H-i',
         region: 'Northwest European Shelf',
@@ -80,6 +92,8 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       return {
         physics: 'cmems_mod_arc_phy_anfc_6km_detided_P1D-m',
         biogeochemistry: 'cmems_mod_arc_bgc_anfc_ecosmo_P1D-m',
+        planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
+        zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
         transparency: 'cmems_obs-oc_arc_bgc-transp_nrt_l4-multi-4km_P1M',
         waves: 'cmems_mod_glo_wav_anfc_0.083deg_PT3H-i', // Arctic has no wave product, use GLO
         region: 'Arctic',
@@ -91,6 +105,8 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
         physics: 'cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m', // Temperature dataset
         salinity: 'cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m', // Salinity dataset (split from physics)
         biogeochemistry: 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m',
+        planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
+        zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
         transparency: 'cmems_obs-oc_glo_bgc-transp_nrt_l4-gapfree-multi-4km_P1D', // NRT for current data (MY has ~1 week lag)
         waves: 'cmems_mod_glo_wav_anfc_0.083deg_PT3H-i',
         region: 'Global Ocean',
@@ -118,13 +134,15 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
     return {
       physics: 'cmems_mod_bal_phy_anfc_P1D-m',
       biogeochemistry: 'cmems_mod_bal_bgc_anfc_P1D-m',
+      planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
+      zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
       transparency: 'cmems_obs-oc_bal_bgc-transp_nrt_l3-olci-300m_P1D',
       waves: 'cmems_mod_glo_wav_anfc_0.083deg_PT3H-i',
       region: 'Baltic Sea',
       coverage: 'BALTICSEA_ANALYSIS_FORECAST',
     };
   }
-  
+
   // Mediterranean Sea (Italian, Greek, Turkish Med, French Med, Spanish islands, etc.)
   if (
     regionLower.includes('mediterranean') ||
@@ -157,13 +175,15 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
     return {
       physics: 'cmems_mod_med_phy_anfc_4.2km_P1D-m',
       biogeochemistry: 'cmems_mod_med_bgc-bio_anfc_4.2km_P1D-m',
+      planktonFunctionalTypes: 'cmems_mod_med_bgc-pft_anfc_4.2km_P1D-m',
+      zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
       transparency: 'cmems_obs-oc_med_bgc-transp_nrt_l3-multi-1km_P1D', // NRT for current data (MY has ~1 week lag)
       waves: 'cmems_mod_glo_wav_anfc_0.083deg_PT3H-i',
       region: 'Mediterranean Sea',
       coverage: 'MEDSEA_ANALYSIS_FORECAST',
     };
   }
-  
+
     // Black Sea (Bulgarian, Romanian, Turkish Black Sea)
   if (
     regionLower.includes('black sea') ||
@@ -177,13 +197,15 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
     return {
       physics: 'cmems_mod_blk_phy_anfc_2.5km_P1D-m',
       biogeochemistry: 'cmems_mod_blk_bgc_anfc_2.5km_P1D-m',
+      planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
+      zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
       transparency: 'cmems_obs-oc_blk_bgc-transp_nrt_l3-multi-1km_P1D',
       waves: 'cmems_mod_blk_wav_anfc_2.5km_PT1H-i',
       region: 'Black Sea',
       coverage: 'BLKSEA_ANALYSIS_FORECAST',
     };
   }
-  
+
   // IBI - Iberia-Biscay-Ireland (Portugal, Spain Atlantic, Ireland, SW UK, Bay of Biscay)
   if (
     regionLower.includes('portuguese') ||
@@ -209,13 +231,15 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
     return {
       physics: 'cmems_mod_ibi_phy_anfc_0.027deg-3D_P1D-m',
       biogeochemistry: 'cmems_mod_ibi_bgc_anfc_0.027deg-3D_P1D-m',
+      planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
+      zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
       transparency: 'cmems_obs-oc_atl_bgc-transp_nrt_l3-multi-1km_P1D', // NRT for current data (MY has ~1 week lag)
       waves: 'cmems_mod_ibi_wav_anfc_0.027deg_PT1H-i',
       region: 'Iberia-Biscay-Ireland',
       coverage: 'IBI_ANALYSIS_FORECAST',
     };
   }
-  
+
   // Northwest European Shelf (North Sea, English Channel, Scottish waters, Norwegian coast)
   if (
     regionLower.includes('north sea') ||
@@ -246,25 +270,29 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
       physics: 'cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m', // Temperature dataset (split from salinity)
       salinity: 'cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m', // Salinity dataset (split from physics)
       biogeochemistry: 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m',
+      planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
+      zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
       transparency: 'cmems_obs-oc_atl_bgc-transp_nrt_l3-multi-1km_P1D', // NRT for current data (MY has ~1 week lag)
       waves: 'cmems_mod_glo_wav_anfc_0.083deg_PT3H-i',
       region: 'Northwest European Shelf',
       coverage: 'GLOBAL_ANALYSIS_FORECAST',
     };
   }
-  
+
   // Arctic (Norwegian Arctic)
   if (regionLower.includes('arctic')) {
     return {
       physics: 'cmems_mod_arc_phy_anfc_6km_detided_P1D-m',
       biogeochemistry: 'cmems_mod_arc_bgc_anfc_ecosmo_P1D-m',
+      planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
+      zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
       transparency: 'cmems_obs-oc_arc_bgc-transp_nrt_l4-multi-4km_P1M',
       waves: 'cmems_mod_glo_wav_anfc_0.083deg_PT3H-i',
       region: 'Arctic',
       coverage: 'ARCTIC_ANALYSIS_FORECAST',
     };
   }
-  
+
   // No specific regional model found
   return null;
 }

@@ -78,6 +78,8 @@ export class RealCopernicusProvider implements CopernicusProvider {
       let currentsData: CopernicusTimeseries | null = null;
       let transparencyData: CopernicusTimeseries | null = null;
       let bioData: CopernicusTimeseries | null = null;
+      let pftData: CopernicusTimeseries | null = null;
+      let planktonData: CopernicusTimeseries | null = null;
       let waveData: CopernicusTimeseries | undefined;
 
       // Try temperature with date fallback THEN padding
@@ -266,6 +268,82 @@ export class RealCopernicusProvider implements CopernicusProvider {
         }
       }
 
+      // Try PFT (phytoplankton carbon) - separate dataset from bgc-bio
+      const pftDataset = this.datasetConfig?.planktonFunctionalTypes || 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m';
+      for (const dayOffset of stableDateFallbacks) {
+        if (pftData) break;
+
+        const pftDate = new Date(start);
+        pftDate.setDate(pftDate.getDate() - dayOffset);
+        const pftDateStr = pftDate.toISOString();
+
+        for (const padding of paddings) {
+          try {
+            const pftFile = path.join(tempDir, `pft_${padding}_d${dayOffset}.nc`);
+            await this.fetchDatasetWithPadding(
+              pftDataset,
+              ['phyc'],  // Phytoplankton carbon
+              lat,
+              lon,
+              pftDateStr,
+              pftDateStr,
+              pftFile,
+              padding
+            );
+            pftData = await this.parseNetCDF(pftFile, 'biogeochemical');
+            if (pftData && this.hasValidData(pftData)) {
+              const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
+              console.log(`   ✅ PFT (phytoplankton) data found with ${padding}° padding${ageNote}`);
+              break;
+            }
+          } catch (err) {
+            const isLastAttempt = dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1] &&
+                                 padding === paddings[paddings.length - 1];
+            if (isLastAttempt) {
+              console.warn(`   ⚠️  No PFT (phytoplankton) data available`);
+            }
+          }
+        }
+      }
+
+      // Try plankton (zooplankton carbon) - separate dataset from bgc-bio
+      const planktonDataset = this.datasetConfig?.zooplankton || 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m';
+      for (const dayOffset of stableDateFallbacks) {
+        if (planktonData) break;
+
+        const planktonDate = new Date(start);
+        planktonDate.setDate(planktonDate.getDate() - dayOffset);
+        const planktonDateStr = planktonDate.toISOString();
+
+        for (const padding of paddings) {
+          try {
+            const planktonFile = path.join(tempDir, `plankton_${padding}_d${dayOffset}.nc`);
+            await this.fetchDatasetWithPadding(
+              planktonDataset,
+              ['zooc'],  // Zooplankton carbon
+              lat,
+              lon,
+              planktonDateStr,
+              planktonDateStr,
+              planktonFile,
+              padding
+            );
+            planktonData = await this.parseNetCDF(planktonFile, 'biogeochemical');
+            if (planktonData && this.hasValidData(planktonData)) {
+              const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
+              console.log(`   ✅ Plankton (zooplankton) data found with ${padding}° padding${ageNote}`);
+              break;
+            }
+          } catch (err) {
+            const isLastAttempt = dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1] &&
+                                 padding === paddings[paddings.length - 1];
+            if (isLastAttempt) {
+              console.warn(`   ⚠️  No plankton (zooplankton) data available`);
+            }
+          }
+        }
+      }
+
       // Wave data is optional, try with date fallback (max 1 day old)
       for (const dayOffset of dynamicDateFallbacks) {
         if (waveData) break;
@@ -338,6 +416,34 @@ export class RealCopernicusProvider implements CopernicusProvider {
         } else {
           // Use transparency as the BGC data if no other BGC data exists
           bioData = transparencyData;
+        }
+      }
+
+      // Merge PFT (phytoplankton carbon) into biogeochemical data
+      if (pftData && pftData.records.length > 0) {
+        if (bioData) {
+          bioData.variables = [...bioData.variables, ...pftData.variables];
+          bioData.records.forEach((record, idx) => {
+            if (pftData!.records[idx]) {
+              record.variables = { ...record.variables, ...pftData!.records[idx].variables };
+            }
+          });
+        } else {
+          bioData = pftData;
+        }
+      }
+
+      // Merge plankton (zooplankton carbon) into biogeochemical data
+      if (planktonData && planktonData.records.length > 0) {
+        if (bioData) {
+          bioData.variables = [...bioData.variables, ...planktonData.variables];
+          bioData.records.forEach((record, idx) => {
+            if (planktonData!.records[idx]) {
+              record.variables = { ...record.variables, ...planktonData!.records[idx].variables };
+            }
+          });
+        } else {
+          bioData = planktonData;
         }
       }
 

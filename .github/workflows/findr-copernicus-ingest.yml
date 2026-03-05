@@ -21,6 +21,10 @@ jobs:
     runs-on: ubuntu-24.04
     if: ${{ github.repository == 'Dovieandi-se-tovya-sagain/godaisy-core' }}
     timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        region: [BAL, MED, BLK, IBI, NWS, ARC, GLO]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -68,45 +72,7 @@ jobs:
           echo "=== Warm-up catalogue ==="
           copernicusmarine products --limit 1 || true
 
-      - name: Smoke test - single CLI subset call
-        env:
-          COPERNICUSMARINE_SERVICE_USERNAME: ${{ secrets.COPERNICUS_USERNAME }}
-          COPERNICUSMARINE_SERVICE_PASSWORD: ${{ secrets.COPERNICUS_PASSWORD }}
-        run: |
-          echo "=== Testing copernicusmarine subset with known-good North Sea location ==="
-          YESTERDAY=$(date -d "yesterday" +%Y-%m-%d)
-          echo "Date: $YESTERDAY"
-          echo "Dataset: cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m"
-          echo "Location: 56.25N, 3.0E (North Sea)"
-          echo ""
-          copernicusmarine subset \
-            --dataset-id cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m \
-            --variable thetao \
-            --minimum-longitude 2.75 \
-            --maximum-longitude 3.25 \
-            --minimum-latitude 56.0 \
-            --maximum-latitude 56.5 \
-            --start-datetime "$YESTERDAY" \
-            --end-datetime "$YESTERDAY" \
-            --output-directory /tmp \
-            --output-filename smoke_test.nc \
-            --overwrite \
-            --disable-progress-bar
-          echo ""
-          echo "=== Smoke test result ==="
-          ls -la /tmp/smoke_test.nc || echo "ERROR: File not created!"
-          echo ""
-          echo "=== Parse with Python ==="
-          python3 -c "
-          import xarray as xr
-          ds = xr.open_dataset('/tmp/smoke_test.nc')
-          print('Variables:', list(ds.data_vars))
-          print('Dims:', dict(ds.dims))
-          for v in ds.data_vars:
-              print(f'  {v}: shape={ds[v].shape}, min={float(ds[v].min()):.3f}, max={float(ds[v].max()):.3f}')
-          "
-
-      - name: Run Copernicus data ingestion (with retry)
+      - name: Run Copernicus data ingestion for ${{ matrix.region }} (with retry)
         id: ingest
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -115,12 +81,43 @@ jobs:
           COPERNICUS_PASSWORD: ${{ secrets.COPERNICUS_PASSWORD }}
           FINDR_CONDITIONS_DELAY_MS: '200'
           FINDR_CONDITIONS_BATCH_SIZE: '10'
+          FINDR_CONDITIONS_REGION: ${{ matrix.region }}
         run: |
+          echo "=== Ingesting region: ${{ matrix.region }} ==="
           npx tsx scripts/ingestion/ingest-copernicus-data.ts || {
             echo 'First attempt failed, retrying in 30s...'
             sleep 30
             npx tsx scripts/ingestion/ingest-copernicus-data.ts
           }
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmems-ingest-logs-${{ matrix.region }}-${{ github.run_id }}
+          path: |
+            **/*.log
+            copernicus-*.json
+            run-*.txt
+          if-no-files-found: ignore
+
+  verify:
+    runs-on: ubuntu-24.04
+    if: ${{ github.repository == 'Dovieandi-se-tovya-sagain/godaisy-core' && always() }}
+    needs: ingest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Node dependencies
+        run: npm ci --legacy-peer-deps
 
       - name: Verify data was ingested
         id: verify
@@ -130,19 +127,8 @@ jobs:
         run: |
           npx tsx scripts/ingestion/verify-database-status.ts
 
-      - name: Upload logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: cmems-ingest-logs-${{ github.run_id }}
-          path: |
-            **/*.log
-            copernicus-*.json
-            run-*.txt
-          if-no-files-found: ignore
-
       - name: Create GitHub Issue on failure
-        if: failure()
+        if: ${{ needs.ingest.result == 'failure' }}
         uses: actions/github-script@v7
         with:
           script: |
@@ -161,7 +147,7 @@ jobs:
             - Data validation failure
 
             ### Impact:
-            - \`findr_conditions_latest\` table may be empty or stale
+            - \`grid_conditions_latest\` table may have stale data for some regions
             - Predictions will show reduced accuracy or outdated data
 
             ### Actions Required:
@@ -193,7 +179,7 @@ jobs:
             }
 
       - name: Close success issues
-        if: success()
+        if: ${{ needs.ingest.result == 'success' }}
         uses: actions/github-script@v7
         with:
           script: |

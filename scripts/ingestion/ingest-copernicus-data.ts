@@ -45,6 +45,7 @@
  *   FINDR_CONDITIONS_FRESHNESS_HOURS - Optional: skip cells with data fresher than N hours (default 24)
  *   FINDR_CONDITIONS_BATCH_SIZE - Optional: process N grid cells in parallel (default 5)
  *   FINDR_CONDITIONS_FORCE_REFRESH - Optional: force refresh all cells, ignoring freshness (default false)
+ *   FINDR_CONDITIONS_REGION - Optional: only process cells in this CMEMS region (BAL, MED, BLK, IBI, NWS, ARC, GLO)
  */
 
 import { config } from 'dotenv';
@@ -66,6 +67,7 @@ const DELAY_MS = process.env.FINDR_CONDITIONS_DELAY_MS ? parseInt(process.env.FI
 const FRESHNESS_HOURS = process.env.FINDR_CONDITIONS_FRESHNESS_HOURS ? parseInt(process.env.FINDR_CONDITIONS_FRESHNESS_HOURS) : 24;
 const BATCH_SIZE = process.env.FINDR_CONDITIONS_BATCH_SIZE ? parseInt(process.env.FINDR_CONDITIONS_BATCH_SIZE) : 5;
 const FORCE_REFRESH = process.env.FINDR_CONDITIONS_FORCE_REFRESH === 'true';
+const REGION_FILTER = process.env.FINDR_CONDITIONS_REGION?.toUpperCase() || '';
 
 // Validate credentials
 if (!SUPABASE_URL || !SUPABASE_KEY) {
@@ -520,6 +522,15 @@ async function main() {
   }
   if (parsedCount > 0) {
     console.log(`   Parsed ${parsedCount} cell coordinates from cell IDs (not in rectangles_025deg_api)`)
+  }
+
+  // Filter by CMEMS region if specified (used by matrix workflow)
+  if (REGION_FILTER) {
+    const beforeCount = enrichedCells.length;
+    const filtered = enrichedCells.filter(c => c.cmems_region === REGION_FILTER);
+    console.log(`🌍 Region filter: ${REGION_FILTER} → ${filtered.length} of ${beforeCount} cells`);
+    enrichedCells.length = 0;
+    enrichedCells.push(...filtered);
   }
 
   const rectanglesToProcess = LIMIT ? enrichedCells.slice(0, LIMIT) : enrichedCells;
