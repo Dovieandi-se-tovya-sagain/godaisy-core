@@ -203,7 +203,7 @@ interface GridCell {
  *
  * Not available in grid_conditions_latest (stored in sources metadata):
  *   current_speed_ms, current_direction_deg, current_east_ms, current_north_ms
- *   mixed_layer_depth_m, sea_surface_height_m
+ *   sea_surface_height_m
  *   swell_height_m (separate from wave_height)
  */
 interface GridConditionsRow {
@@ -219,6 +219,7 @@ interface GridConditionsRow {
   zooplankton_mmol_m3: number | null;
   phytoplankton_mmol_m3: number | null;
   primary_production_mg_c_m3_day: number | null;
+  mixed_layer_depth_m: number | null;
   wave_direction_deg: number | null;
   wave_period_s: number | null;
   wave_height_m: number | null;
@@ -341,6 +342,7 @@ function snapshotToRow(
     zooplankton_mmol_m3: snapshot.zooplanktonSurface ?? null,
     phytoplankton_mmol_m3: snapshot.phytoplanktonSurface ?? null,
     primary_production_mg_c_m3_day: snapshot.primaryProductionSurface ?? null,
+    mixed_layer_depth_m: snapshot.mixedLayerDepth ?? null,
     wave_direction_deg: snapshot.waveDirection ?? null,
     wave_period_s: snapshot.wavePeriod ?? null,
     wave_height_m: snapshot.windSeaHeight ?? snapshot.swellHeight ?? null,
@@ -369,6 +371,7 @@ function buildNonNullUpdate(row: GridConditionsRow): Record<string, unknown> {
   if (row.zooplankton_mmol_m3 !== null) update.zooplankton_mmol_m3 = row.zooplankton_mmol_m3;
   if (row.phytoplankton_mmol_m3 !== null) update.phytoplankton_mmol_m3 = row.phytoplankton_mmol_m3;
   if (row.primary_production_mg_c_m3_day !== null) update.primary_production_mg_c_m3_day = row.primary_production_mg_c_m3_day;
+  if (row.mixed_layer_depth_m !== null) update.mixed_layer_depth_m = row.mixed_layer_depth_m;
   if (row.wave_direction_deg !== null) update.wave_direction_deg = row.wave_direction_deg;
   if (row.wave_period_s !== null) update.wave_period_s = row.wave_period_s;
   if (row.wave_height_m !== null) update.wave_height_m = row.wave_height_m;
