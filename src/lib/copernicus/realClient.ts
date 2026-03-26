@@ -76,6 +76,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
       let temperatureData: CopernicusTimeseries | null = null;
       let salinityData: CopernicusTimeseries | null = null;
       let currentsData: CopernicusTimeseries | null = null;
+      let mldData: CopernicusTimeseries | null = null;
       let transparencyData: CopernicusTimeseries | null = null;
       let bioData: CopernicusTimeseries | null = null;
       let pftData: CopernicusTimeseries | null = null;
@@ -184,6 +185,45 @@ export class RealCopernicusProvider implements CopernicusProvider {
           } catch (_err) {
             if (dayOffset === dynamicDateFallbacks[dynamicDateFallbacks.length - 1]) {
               console.warn(`   ⚠️  No currents data available`);
+            }
+          }
+        }
+      }
+
+      // Try mixed layer depth (mlotst) - 2D variable from separate physics dataset
+      // MLD is stable over days (like BGC), so use stableDateFallbacks
+      const mldDataset = this.datasetConfig?.mixedLayerDepth || 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m';
+      for (const dayOffset of stableDateFallbacks) {
+        if (mldData) break;
+
+        const mldDate = new Date(start);
+        mldDate.setDate(mldDate.getDate() - dayOffset);
+        const mldDateStr = mldDate.toISOString();
+
+        for (const padding of paddings) {
+          try {
+            const mldFile = path.join(tempDir, `mld_${padding}_d${dayOffset}.nc`);
+            await this.fetchDatasetWithPadding(
+              mldDataset,
+              ['mlotst'],  // Ocean mixed layer thickness (2D, no depth dimension)
+              lat,
+              lon,
+              mldDateStr,
+              mldDateStr,
+              mldFile,
+              padding
+            );
+            mldData = await this.parseNetCDF(mldFile, 'physics');
+            if (mldData && this.hasValidData(mldData)) {
+              const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
+              console.log(`   ✅ MLD (mixed layer depth) data found with ${padding}° padding${ageNote}`);
+              break;
+            }
+          } catch (err) {
+            const isLastAttempt = dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1] &&
+                                 padding === paddings[paddings.length - 1];
+            if (isLastAttempt) {
+              console.warn(`   ⚠️  No MLD (mixed layer depth) data available`);
             }
           }
         }
@@ -401,6 +441,19 @@ export class RealCopernicusProvider implements CopernicusProvider {
             }
           });
         }
+        // Merge MLD (mlotst) into the physics records
+        // mlotst is a 2D variable (no depth) so it only has surface records
+        if (mldData && mldData.records.length > 0) {
+          physicsData.variables = [...physicsData.variables, ...mldData.variables];
+          physicsData.records.forEach((record, idx) => {
+            if (mldData!.records[idx]) {
+              record.variables = { ...record.variables, ...mldData!.records[idx].variables };
+            }
+          });
+        }
+      } else if (mldData && mldData.records.length > 0) {
+        // No temperature data but MLD available - use MLD as physics base
+        physicsData = mldData;
       }
 
       // Merge transparency (kd490) into biogeochemical data
