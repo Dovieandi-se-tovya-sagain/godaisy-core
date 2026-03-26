@@ -9,6 +9,7 @@ export interface CopernicusDatasetConfig {
   physics: string;  // Main physics dataset (or temperature for split datasets)
   salinity?: string;  // Separate salinity dataset (for Mediterranean)
   currents?: string;  // Separate currents dataset (for Mediterranean)
+  mixedLayerDepth?: string;  // 2D physics dataset for mlotst (thermocline depth)
   biogeochemistry: string;
   planktonFunctionalTypes?: string;  // PFT dataset for phytoplankton carbon (phyc)
   zooplankton?: string;  // Plankton dataset for zooplankton carbon (zooc)
@@ -34,6 +35,7 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
     case 'BAL':
       return {
         physics: 'cmems_mod_bal_phy_anfc_P1D-m',
+        mixedLayerDepth: 'cmems_mod_bal_phy_anfc_P1D-m', // BAL bundled physics includes mlotst
         biogeochemistry: 'cmems_mod_bal_bgc_anfc_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -45,6 +47,7 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
     case 'MED':
       return {
         physics: 'cmems_mod_med_phy_anfc_4.2km_P1D-m', // Fixed: was 0.042deg-3D, now 4.2km
+        mixedLayerDepth: 'cmems_mod_med_phy-mld_anfc_4.2km_P1D-m', // MED dedicated MLD product
         biogeochemistry: 'cmems_mod_med_bgc-bio_anfc_4.2km_P1D-m', // Fixed: added -bio suffix, changed resolution
         planktonFunctionalTypes: 'cmems_mod_med_bgc-pft_anfc_4.2km_P1D-m', // Med has its own PFT product
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -56,6 +59,7 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
     case 'BLK':
       return {
         physics: 'cmems_mod_blk_phy_anfc_2.5km_P1D-m',
+        mixedLayerDepth: 'cmems_mod_blk_phy_anfc_2.5km_P1D-m', // BLK bundled physics includes mlotst
         biogeochemistry: 'cmems_mod_blk_bgc_anfc_2.5km_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -67,6 +71,7 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
     case 'IBI':
       return {
         physics: 'cmems_mod_ibi_phy_anfc_0.027deg-3D_P1D-m',
+        mixedLayerDepth: 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m', // IBI 3D physics may not expose mlotst; use GLO 2D
         biogeochemistry: 'cmems_mod_ibi_bgc_anfc_0.027deg-3D_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -80,6 +85,7 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       return {
         physics: 'cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m', // Temperature dataset
         salinity: 'cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m', // Salinity dataset (split from physics)
+        mixedLayerDepth: 'cmems_mod_nws_phy-mld_anfc_7km-2D_P1D-m', // NWS dedicated MLD product (7km)
         biogeochemistry: 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -91,6 +97,7 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
     case 'ARC':
       return {
         physics: 'cmems_mod_arc_phy_anfc_6km_detided_P1D-m',
+        mixedLayerDepth: 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m', // ARC: use GLO 2D physics for mlotst
         biogeochemistry: 'cmems_mod_arc_bgc_anfc_ecosmo_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -104,6 +111,7 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       return {
         physics: 'cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m', // Temperature dataset
         salinity: 'cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m', // Salinity dataset (split from physics)
+        mixedLayerDepth: 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m', // GLO 2D physics for mlotst (no depth dimension)
         biogeochemistry: 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -133,6 +141,7 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
   ) {
     return {
       physics: 'cmems_mod_bal_phy_anfc_P1D-m',
+      mixedLayerDepth: 'cmems_mod_bal_phy_anfc_P1D-m',
       biogeochemistry: 'cmems_mod_bal_bgc_anfc_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -174,6 +183,7 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
   ) {
     return {
       physics: 'cmems_mod_med_phy_anfc_4.2km_P1D-m',
+      mixedLayerDepth: 'cmems_mod_med_phy-mld_anfc_4.2km_P1D-m',
       biogeochemistry: 'cmems_mod_med_bgc-bio_anfc_4.2km_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_med_bgc-pft_anfc_4.2km_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -196,6 +206,7 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
   ) {
     return {
       physics: 'cmems_mod_blk_phy_anfc_2.5km_P1D-m',
+      mixedLayerDepth: 'cmems_mod_blk_phy_anfc_2.5km_P1D-m',
       biogeochemistry: 'cmems_mod_blk_bgc_anfc_2.5km_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -230,6 +241,7 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
   ) {
     return {
       physics: 'cmems_mod_ibi_phy_anfc_0.027deg-3D_P1D-m',
+      mixedLayerDepth: 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m',
       biogeochemistry: 'cmems_mod_ibi_bgc_anfc_0.027deg-3D_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -269,6 +281,7 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
     return {
       physics: 'cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m', // Temperature dataset (split from salinity)
       salinity: 'cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m', // Salinity dataset (split from physics)
+      mixedLayerDepth: 'cmems_mod_nws_phy-mld_anfc_7km-2D_P1D-m', // NWS dedicated MLD product (7km)
       biogeochemistry: 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -283,6 +296,7 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
   if (regionLower.includes('arctic')) {
     return {
       physics: 'cmems_mod_arc_phy_anfc_6km_detided_P1D-m',
+      mixedLayerDepth: 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m',
       biogeochemistry: 'cmems_mod_arc_bgc_anfc_ecosmo_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',

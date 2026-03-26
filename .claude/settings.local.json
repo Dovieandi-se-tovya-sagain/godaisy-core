@@ -3,7 +3,12 @@
     "allow": [
       "Bash(npm run build:*)",
       "Bash(git fetch:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "WebSearch",
+      "WebFetch(domain:help.marine.copernicus.eu)",
+      "WebFetch(domain:developers.google.com)",
+      "WebFetch(domain:docs.agriculturevlab.eu)",
+      "WebFetch(domain:data.marine.copernicus.eu)"
     ]
   }
 }
