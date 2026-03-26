@@ -81,6 +81,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
       let bioData: CopernicusTimeseries | null = null;
       let pftData: CopernicusTimeseries | null = null;
       let planktonData: CopernicusTimeseries | null = null;
+      let ppData: CopernicusTimeseries | null = null;
       let waveData: CopernicusTimeseries | undefined;
 
       // Try temperature with date fallback THEN padding
@@ -384,6 +385,47 @@ export class RealCopernicusProvider implements CopernicusProvider {
         }
       }
 
+      // Try primary production (nppv) - separate dataset from bgc-bio in split BGC models (GLO, NWS, MED)
+      // For bundled regional models (BAL, BLK, IBI, ARC), nppv comes from the main BGC fetch
+      const ppDataset = this.datasetConfig?.primaryProduction;
+      if (ppDataset) {
+        for (const dayOffset of stableDateFallbacks) {
+          if (ppData) break;
+
+          const ppDate = new Date(start);
+          ppDate.setDate(ppDate.getDate() - dayOffset);
+          const ppDateStr = ppDate.toISOString();
+
+          for (const padding of paddings) {
+            try {
+              const ppFile = path.join(tempDir, `pp_${padding}_d${dayOffset}.nc`);
+              await this.fetchDatasetWithPadding(
+                ppDataset,
+                ['nppv'],  // Net primary production
+                lat,
+                lon,
+                ppDateStr,
+                ppDateStr,
+                ppFile,
+                padding
+              );
+              ppData = await this.parseNetCDF(ppFile, 'biogeochemical');
+              if (ppData && this.hasValidData(ppData)) {
+                const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
+                console.log(`   ✅ Primary production (nppv) data found with ${padding}° padding${ageNote}`);
+                break;
+              }
+            } catch (err) {
+              const isLastAttempt = dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1] &&
+                                   padding === paddings[paddings.length - 1];
+              if (isLastAttempt) {
+                console.warn(`   ⚠️  No primary production (nppv) data available`);
+              }
+            }
+          }
+        }
+      }
+
       // Wave data is optional, try with date fallback (max 1 day old)
       for (const dayOffset of dynamicDateFallbacks) {
         if (waveData) break;
@@ -497,6 +539,20 @@ export class RealCopernicusProvider implements CopernicusProvider {
           });
         } else {
           bioData = planktonData;
+        }
+      }
+
+      // Merge primary production (nppv) into biogeochemical data
+      if (ppData && ppData.records.length > 0) {
+        if (bioData) {
+          bioData.variables = [...bioData.variables, ...ppData.variables];
+          bioData.records.forEach((record, idx) => {
+            if (ppData!.records[idx]) {
+              record.variables = { ...record.variables, ...ppData!.records[idx].variables };
+            }
+          });
+        } else {
+          bioData = ppData;
         }
       }
 
@@ -655,11 +711,18 @@ def is_valid_value(val, var_name):
     abs_val = abs(val)
     if abs_val > 9000:  # e.g., 9999, 9345, 15442, 9.96921e+36
         return False
+
+    var_lower = var_name.lower()
+
+    # Primary production (nppv) can reach 2000+ mg C/m³/day in productive coastal waters
+    # Must check BEFORE the generic >1000 filter below
+    if 'nppv' in var_lower:
+        return 0 <= val <= 5000
+
     if abs_val > 1000 and abs_val < 10000:  # e.g., 9999, -32767
         return False
 
     # Variable-specific validation (physically plausible ranges)
-    var_lower = var_name.lower()
 
     # Temperature variables (thetao, to, sst, etc.)
     if 'temp' in var_lower or 'thetao' in var_lower or 'to' in var_lower or 'sst' in var_lower:
