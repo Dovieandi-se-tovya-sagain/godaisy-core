@@ -1,4 +1,4 @@
-# GitHub Setup Guide - App Separation
+      `# GitHub Setup Guide - App Separation
 
 **Created:** January 7, 2026
 **Updated:** January 28, 2026
