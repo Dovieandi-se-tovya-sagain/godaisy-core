@@ -7,7 +7,7 @@
  *
  * Grid System:
  * - 0.25° resolution (~ 27.8 km at equator, ~19.7 km at 45°N)
- * - Cell IDs: "G025_N41W074" format (Grid 0.25deg, North 41, West 074)
+ * - Cell IDs: "G025_N4075W07400" format (Grid 0.25deg, center lat×100, center lon×100)
  * - Compatible with rectangles_025deg, rectangles_unified, grid_conditions_latest tables
  *
  * Database Tables:
@@ -26,48 +26,30 @@
  */
 
 /**
- * Snap coordinate to nearest 0.25-degree grid cell
- */
-function snapToGrid(value: number, resolution: number = 0.25): number {
-  return Math.round(value / resolution) * resolution;
-}
-
-/**
- * Generate grid cell ID from coordinates in database-compatible format
- * Format: "G025_N41W074" (Grid 0.25deg, North 41, West 074)
+ * Generate grid cell ID from coordinates in database-compatible format.
+ * Format: "G025_N4375W00700" (Grid 0.25deg, lat_max×100, |lon_max|×100)
  *
- * Grid cell boundaries are aligned at 0.25° intervals.
- * The ID components represent:
- * - Latitude: ceil(lat_south) - the integer degree of the cell's southern edge
- * - Longitude: ceil(abs(lon_west)) - the integer degree of the cell's western edge
+ * The ID encodes the cell's upper-right boundary (lat_max, lon_max) × 100,
+ * matching the convention in the grid_025deg database table.
+ *
+ * For a coordinate (lat, lon), the containing cell is:
+ *   lat_min = floor(lat/0.25)*0.25,  lat_max = lat_min + 0.25
+ *   lon_min = floor(lon/0.25)*0.25,  lon_max = lon_min + 0.25
  *
  * Examples:
- * - New York (40.7128, -74.0060) → G025_N41W074 (cell bounds: [40.5-40.75, -74.25--74.0])
- * - Miami (25.7617, -80.1918) → G025_N26W081 (cell bounds: [25.5-25.75, -80.25--80.0])
+ * - Bay of Biscay (43.6, -7.1) → G025_N4375W00700 (cell [43.50,43.75]×[-7.25,-7.00])
  */
 function generateGridCellId(lat: number, lon: number): string {
-  // Snap to 0.25° grid to get cell center
-  const gridLat = snapToGrid(lat, 0.25);
-  const gridLon = snapToGrid(lon, 0.25);
+  const latMax = Math.floor(lat / 0.25) * 0.25 + 0.25;
+  const lonMax = Math.floor(lon / 0.25) * 0.25 + 0.25;
 
-  // Calculate cell bounds (each cell is 0.25° x 0.25°)
-  const latSouth = gridLat - 0.125;
-  const _latNorth = gridLat + 0.125;
-  const lonWest = gridLon - 0.125;
-  const _lonEast = gridLon + 0.125;
+  const latHemisphere = latMax >= 0 ? 'N' : 'S';
+  const lonHemisphere = lonMax >= 0 ? 'E' : 'W';
 
-  // Determine hemisphere and integer degree
-  // Latitude: Use ceil(lat_south) for the ID component
-  const latHemisphere = gridLat >= 0 ? 'N' : 'S';
-  const latDegree = Math.abs(Math.ceil(latSouth));
+  const latHundredths = Math.round(Math.abs(latMax) * 100);
+  const lonHundredths = Math.round(Math.abs(lonMax) * 100);
 
-  // Longitude: Use ceil(abs(lon_west)) for the ID component
-  const lonHemisphere = gridLon >= 0 ? 'E' : 'W';
-  const lonDegree = Math.abs(Math.ceil(lonWest));
-
-  // Format: G025_[N/S][LAT][E/W][LON]
-  // Latitude is 2 digits, longitude is 3 digits with zero-padding
-  return `G025_${latHemisphere}${String(latDegree).padStart(2, '0')}${lonHemisphere}${String(lonDegree).padStart(3, '0')}`;
+  return `G025_${latHemisphere}${String(latHundredths).padStart(4, '0')}${lonHemisphere}${String(lonHundredths).padStart(5, '0')}`;
 }
 
 /**
@@ -117,31 +99,47 @@ export function getWaterRegion(lat: number, lon: number): string {
  *
  * @param lat Latitude (-90 to 90)
  * @param lon Longitude (-180 to 180)
- * @returns Grid cell ID in format "G025_N41W074" (database-compatible)
+ * @returns Grid cell ID in format "G025_N4075W07400" (database-compatible)
  *
  * @example
- * findNearestGridCellId(40.7128, -74.0060) // Returns "G025_N41W074" (New York)
- * findNearestGridCellId(25.7617, -80.1918) // Returns "G025_N26W081" (Miami)
+ * findNearestGridCellId(40.7128, -74.0060) // Returns "G025_N4075W07400" (New York)
+ * findNearestGridCellId(25.7617, -80.1918) // Returns "G025_N2575W08025" (Miami)
  */
 /**
  * Parse a G025_ grid cell ID back to its center coordinates.
  * Inverse of generateGridCellId.
  *
- * @param cellId Grid cell ID e.g. "G025_N00E048"
- * @returns Center coordinates or null if the ID doesn't match the expected format
+ * Supports both new format (4+5 digits) and legacy format (2+3 digits).
+ *
+ * @param cellId Grid cell ID e.g. "G025_N4375W00750" or legacy "G025_N44W007"
+ * @returns Center coordinates or null if the ID doesn't match
  *
  * @example
- * parseGridCellCenter('G025_N00E048') // Returns { lat: 0.125, lon: 48.125 }
- * parseGridCellCenter('G025_N41W074') // Returns { lat: 41.125, lon: -74.125 }
+ * parseGridCellCenter('G025_N4375W00750') // Returns { lat: 43.75, lon: -7.50 }
+ * parseGridCellCenter('G025_N4075W07400') // Returns { lat: 40.75, lon: -74.00 }
  */
 export function parseGridCellCenter(cellId: string): { lat: number; lon: number } | null {
-  const match = cellId.match(/^G025_([NS])(\d{2})([EW])(\d{3})$/i);
-  if (!match) return null;
-  const [, latH, latD, lonH, lonD] = match;
-  return {
-    lat: (latH.toUpperCase() === 'N' ? 1 : -1) * (parseInt(latD, 10) + 0.125),
-    lon: (lonH.toUpperCase() === 'E' ? 1 : -1) * (parseInt(lonD, 10) + 0.125),
-  };
+  // New format: 4-digit lat, 5-digit lon (center × 100)
+  const newMatch = cellId.match(/^G025_([NS])(\d{4})([EW])(\d{5})$/i);
+  if (newMatch) {
+    const [, latH, latStr, lonH, lonStr] = newMatch;
+    return {
+      lat: (latH.toUpperCase() === 'N' ? 1 : -1) * (parseInt(latStr, 10) / 100),
+      lon: (lonH.toUpperCase() === 'E' ? 1 : -1) * (parseInt(lonStr, 10) / 100),
+    };
+  }
+
+  // Legacy format: 2-digit lat, 3-digit lon (integer degrees only)
+  const oldMatch = cellId.match(/^G025_([NS])(\d{2})([EW])(\d{3})$/i);
+  if (oldMatch) {
+    const [, latH, latD, lonH, lonD] = oldMatch;
+    return {
+      lat: (latH.toUpperCase() === 'N' ? 1 : -1) * (parseInt(latD, 10) + 0.125),
+      lon: (lonH.toUpperCase() === 'E' ? 1 : -1) * (parseInt(lonD, 10) + 0.125),
+    };
+  }
+
+  return null;
 }
 
 export function findNearestGridCellId(lat: number, lon: number): string {
@@ -150,7 +148,5 @@ export function findNearestGridCellId(lat: number, lon: number): string {
     throw new Error(`Invalid coordinates: lat=${lat}, lon=${lon}`);
   }
 
-  // Generate grid cell ID using 0.25-degree resolution
-  // Format: G025_N41W074 (compatible with database tables)
   return generateGridCellId(lat, lon);
 }

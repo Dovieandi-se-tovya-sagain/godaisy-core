@@ -104,9 +104,19 @@ function getSimpleRegion(lat: number, lon: number): string {
 }
 
 function parseCellCenter(cellId: string): { lat: number; lon: number } | null {
-  const match = cellId.match(/^G025_([NS])(\d{2})([EW])(\d{3})$/);
-  if (!match) return null;
-  const [, latH, latD, lonH, lonD] = match;
+  // New format: 4-digit lat, 5-digit lon (center × 100)
+  const newMatch = cellId.match(/^G025_([NS])(\d{4})([EW])(\d{5})$/);
+  if (newMatch) {
+    const [, latH, latStr, lonH, lonStr] = newMatch;
+    return {
+      lat: (latH === 'N' ? 1 : -1) * (parseInt(latStr, 10) / 100),
+      lon: (lonH === 'E' ? 1 : -1) * (parseInt(lonStr, 10) / 100),
+    };
+  }
+  // Legacy format: 2-digit lat, 3-digit lon
+  const oldMatch = cellId.match(/^G025_([NS])(\d{2})([EW])(\d{3})$/);
+  if (!oldMatch) return null;
+  const [, latH, latD, lonH, lonD] = oldMatch;
   return {
     lat: (latH === 'N' ? 1 : -1) * (parseInt(latD, 10) + 0.125),
     lon: (lonH === 'E' ? 1 : -1) * (parseInt(lonD, 10) + 0.125),
