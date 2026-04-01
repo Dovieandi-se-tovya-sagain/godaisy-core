@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        region: [BAL, MED, BLK, IBI, NWS, ARC, GLO]
+        region: [BAL, MED, BLK, IBI, NWS, ARC, GLO_AM, GLO_AP, GLO_AF]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

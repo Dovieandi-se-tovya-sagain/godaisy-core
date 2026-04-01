@@ -158,7 +158,11 @@ function getCmemsRegion(region: string, lat: number, lon: number): string {
   if (lat >= 48 && lat <= 63 && lon >= -12 && lon <= 13) return 'NWS';
   if (lat >= 36 && lat <= 54 && lon >= -20 && lon <= -5) return 'IBI';
 
-  return 'GLO';
+  // Split GLOBAL into sub-regions for parallel CI jobs
+  // All use the GLOBAL Copernicus model, but split by longitude for scheduling
+  if (lon <= -30) return 'GLO_AM';   // Americas (~6,600 cells)
+  if (lon >= 90) return 'GLO_AP';    // Asia-Pacific (~6,900 cells)
+  return 'GLO_AF';                   // Africa, Middle East, Indian Ocean (~3,000 cells)
 }
 
 // Use real Copernicus client when credentials are available
@@ -168,10 +172,12 @@ const USE_MOCK = !process.env.COPERNICUS_USERNAME || !process.env.COPERNICUS_PAS
 const providerCache = new Map<string, RealCopernicusProvider>();
 
 function getProvider(region?: string): RealCopernicusProvider {
-  const key = region || 'GLOBAL';
+  // GLO sub-regions (GLO_AM, GLO_AP, GLO_AF) all use the GLOBAL Copernicus model
+  const copernicusRegion = region?.startsWith('GLO') ? undefined : region;
+  const key = copernicusRegion || 'GLOBAL';
   if (!providerCache.has(key)) {
     console.log(`   🔧 Creating new provider for region: ${key}`);
-    providerCache.set(key, new RealCopernicusProvider(region));
+    providerCache.set(key, new RealCopernicusProvider(copernicusRegion));
   }
   return providerCache.get(key)!;
 }
