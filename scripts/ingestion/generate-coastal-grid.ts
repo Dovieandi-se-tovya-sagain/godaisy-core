@@ -274,11 +274,36 @@ async function insertGridCells(cells: CoastalCell[]): Promise<number> {
 
   for (let i = 0; i < cells.length; i += BATCH_SIZE) {
     const batch = cells.slice(i, i + BATCH_SIZE);
-    const rows = batch.map(c => ({
-      cell_id: c.cellId,
-      lat_max: c.latMax,
-      lon_max: c.lonMax,
-    }));
+    const rows = batch.map(c => {
+      // row_ix/col_ix: integer grid indices from origin (-90, -180)
+      const row_ix = Math.round((c.latMin - (-90)) / 0.25);
+      const col_ix = Math.round((c.lonMin - (-180)) / 0.25);
+      return {
+        cell_id: c.cellId,
+        lat_min: c.latMin,
+        lat_max: c.latMax,
+        lon_min: c.lonMin,
+        lon_max: c.lonMax,
+        row_ix,
+        col_ix,
+        geom: JSON.stringify({
+          type: 'Polygon',
+          crs: { type: 'name', properties: { name: 'EPSG:4326' } },
+          coordinates: [[
+            [c.lonMin, c.latMin],
+            [c.lonMax, c.latMin],
+            [c.lonMax, c.latMax],
+            [c.lonMin, c.latMax],
+            [c.lonMin, c.latMin],
+          ]],
+        }),
+        centroid: JSON.stringify({
+          type: 'Point',
+          crs: { type: 'name', properties: { name: 'EPSG:4326' } },
+          coordinates: [c.lonMin + 0.125, c.latMin + 0.125],
+        }),
+      };
+    });
 
     const { error } = await supabase.from('grid_025deg').upsert(rows, { onConflict: 'cell_id' });
 
@@ -291,7 +316,7 @@ async function insertGridCells(cells: CoastalCell[]): Promise<number> {
           .upsert(row, { onConflict: 'cell_id' });
         if (singleErr) {
           failed++;
-          if (failed <= 5) console.error(`     ${row.cell_id}: ${singleErr.message}`);
+          if (failed <= 10) console.error(`     ${row.cell_id}: ${singleErr.message}`);
         } else {
           inserted++;
         }
