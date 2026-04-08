@@ -32,6 +32,10 @@ try:
 finally:
     sys.stdout = _real_stdout
 
+# Module-level credentials (set in main() from env vars)
+_username = None
+_password = None
+
 
 def log(msg):
     """Write log messages to stderr (not stdout, which is for JSON responses)."""
@@ -227,6 +231,11 @@ def handle_subset(request):
                 'overwrite': True,
             }
 
+            # Pass credentials directly to avoid interactive prompts
+            if _username and _password:
+                subset_kwargs['username'] = _username
+                subset_kwargs['password'] = _password
+
             variables = request.get('variables')
             if variables:
                 subset_kwargs['variables'] = variables
@@ -305,12 +314,20 @@ def main():
     # Suppress copernicusmarine progress bars and info logging
     os.environ['COPERNICUSMARINE_DISABLE_PROGRESS_BAR'] = 'True'
 
-    # Do NOT call copernicusmarine.login() here!
-    # The CI workflow runs `copernicusmarine login` in a dedicated step before ingestion,
-    # which caches credentials at ~/.copernicusmarine/.copernicusmarine-credentials.
-    # Calling login() again outputs an interactive "overwrite?" prompt to STDOUT,
-    # which corrupts the JSON-per-line protocol and crashes the worker.
-    log('Using cached credentials from CI login step (no worker-level login)')
+    # Resolve credentials from env vars (set by Node.js parent process)
+    # We do NOT call copernicusmarine.login() — it outputs interactive prompts to stdout
+    # which would corrupt the JSON protocol. Instead, pass credentials directly to subset().
+    global _username, _password
+    _username = (os.environ.get('COPERNICUSMARINE_SERVICE_USERNAME')
+                 or os.environ.get('COPERNICUS_USERNAME')
+                 or None)
+    _password = (os.environ.get('COPERNICUSMARINE_SERVICE_PASSWORD')
+                 or os.environ.get('COPERNICUS_PASSWORD')
+                 or None)
+    if _username:
+        log(f'Credentials available for user: {_username[:3]}***')
+    else:
+        log('WARNING: No credentials found in environment variables')
 
     # Signal readiness
     send_response({'id': 'ready', 'ok': True, 'message': 'worker_ready'})
