@@ -72,7 +72,7 @@ jobs:
             ~/.copernicusmarine
             ~/.config/copernicusmarine
             ~/.cache/copernicusmarine
-          key: cmems-${{ runner.os }}-v1
+          key: cmems-${{ runner.os }}-week-${{ github.run_number }}
 
       - name: Copernicus CLI login and version check
         env:
@@ -85,8 +85,9 @@ jobs:
           echo "=== Login ==="
           yes | copernicusmarine login --username "$COPERNICUS_USERNAME" --password "$COPERNICUS_PASSWORD"
           echo ""
-          echo "=== Warm-up catalogue ==="
-          copernicusmarine products --limit 1 || true
+          echo "=== Warm-up catalogue (physics + BGC) ==="
+          copernicusmarine describe --dataset-id cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m 2>/dev/null | head -5 || true
+          copernicusmarine describe --dataset-id cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m 2>/dev/null | head -5 || true
 
       - name: Run Copernicus data ingestion for ${{ matrix.region }} (with retry)
         id: ingest

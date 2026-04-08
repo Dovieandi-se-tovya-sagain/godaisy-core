@@ -222,11 +222,14 @@ class CopernicusWorker {
   }
 }
 
-// Graceful cleanup on process exit
-process.on('beforeExit', () => CopernicusWorker.shutdown());
+// Graceful cleanup on signals (best-effort, non-blocking)
 process.on('SIGINT', () => { CopernicusWorker.shutdown(); });
 process.on('SIGTERM', () => { CopernicusWorker.shutdown(); });
-process.on('exit', () => { CopernicusWorker.shutdown(); });
+
+/** Shut down the persistent Python worker. Call this when ingestion is complete. */
+export async function shutdownCopernicusWorker(): Promise<void> {
+  await CopernicusWorker.shutdown();
+}
 
 // ---------------------------------------------------------------------------
 // RealCopernicusProvider
@@ -470,7 +473,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
           try {
             bioData = await this.fetchAndParse(
               bioDataset,
-              [],
+              ['chl', 'o2', 'no3', 'po4', 'fe', 'si', 'ph'],
               lat, lon,
               bgcDateStr, bgcDateStr,
               padding

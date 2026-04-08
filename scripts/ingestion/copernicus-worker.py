@@ -294,9 +294,9 @@ def handle_subset(request):
 
 
 def send_response(response):
-    """Write a JSON response to stdout and flush."""
-    sys.stdout.write(json.dumps(response) + '\n')
-    sys.stdout.flush()
+    """Write a JSON response to the real stdout (not sys.stdout which may be redirected)."""
+    _real_stdout.write(json.dumps(response) + '\n')
+    _real_stdout.flush()
 
 
 def main():

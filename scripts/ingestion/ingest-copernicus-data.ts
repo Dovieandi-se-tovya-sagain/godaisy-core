@@ -52,7 +52,7 @@ import { config } from 'dotenv';
 import { resolve } from 'path';
 import { createClient } from '@supabase/supabase-js';
 import { MockCopernicusProvider } from '../../src/lib/copernicus/mockClient';
-import { RealCopernicusProvider } from '../../src/lib/copernicus/realClient';
+import { RealCopernicusProvider, shutdownCopernicusWorker } from '../../src/lib/copernicus/realClient';
 import { toCopernicusMarineData } from '../../src/lib/copernicus/transformers';
 import type { CopernicusMarineSnapshot } from '../../src/lib/copernicus/types';
 
@@ -692,6 +692,9 @@ async function main() {
     console.log(`   - COPERNICUS_USERNAME=your-username`);
     console.log(`   - COPERNICUS_PASSWORD=your-password`);
   }
+
+  // Shut down the persistent Python worker so Node can exit
+  await shutdownCopernicusWorker();
 }
 
 // Run
