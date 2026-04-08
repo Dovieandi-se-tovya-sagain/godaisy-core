@@ -19,6 +19,11 @@ on:
         required: false
         default: '0'
         type: string
+      force:
+        description: 'Force refresh (ignore freshness check)'
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: findr-copernicus-ingest
@@ -94,6 +99,7 @@ jobs:
           FINDR_CONDITIONS_BATCH_SIZE: '10'
           FINDR_CONDITIONS_REGION: ${{ matrix.region }}
           FINDR_CONDITIONS_LIMIT: ${{ github.event.inputs.limit != '0' && github.event.inputs.limit || '' }}
+          FINDR_CONDITIONS_FORCE_REFRESH: ${{ github.event.inputs.force == 'true' && 'true' || '' }}
         run: |
           echo "=== Ingesting region: ${{ matrix.region }} ==="
           npx tsx scripts/ingestion/ingest-copernicus-data.ts || {
