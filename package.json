@@ -1,6 +1,6 @@
 {
   "name": "@dovieandi-se-tovya-sagain/godaisy-core",
-  "version": "1.0.0-beta.47",
+  "version": "1.0.0-beta.49",
   "description": "Shared component library for the Daisy app family",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -55,6 +55,8 @@
     "suncalc": "^1.9.0"
   },
   "devDependencies": {
+    "@capacitor-community/apple-sign-in": "^7.1.0",
+    "@capgo/capacitor-social-login": "^8.3.9",
     "@types/leaflet": "^1.9.21",
     "@types/node": "^20.0.0",
     "@types/react": "^18.0.0",
