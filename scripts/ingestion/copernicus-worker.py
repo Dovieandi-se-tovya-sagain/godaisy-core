@@ -22,7 +22,15 @@ import threading
 
 import numpy as np
 import xarray as xr
-import copernicusmarine
+
+# Redirect stdout during import to prevent copernicusmarine from leaking
+# version/info messages into the JSON protocol on stdout
+_real_stdout = sys.stdout
+sys.stdout = sys.stderr
+try:
+    import copernicusmarine
+finally:
+    sys.stdout = _real_stdout
 
 
 def log(msg):
@@ -223,12 +231,25 @@ def handle_subset(request):
             if variables:
                 subset_kwargs['variables'] = variables
 
-            copernicusmarine.subset(**subset_kwargs)
+            # Redirect stdout to stderr during subset to prevent copernicusmarine
+            # library from leaking progress/info messages into the JSON protocol
+            original_stdout = sys.stdout
+            sys.stdout = sys.stderr
+            try:
+                copernicusmarine.subset(**subset_kwargs)
+            finally:
+                sys.stdout = original_stdout
+
+            # Verify the file was actually created before parsing
+            if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
+                error[0] = f'subset produced no output file (exists={os.path.exists(tmp_path)}, size={os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0})'
+                return
 
             # Parse the downloaded NetCDF
             result[0] = parse_netcdf(tmp_path)
-        except Exception as e:
-            error[0] = str(e)
+        except (Exception, SystemExit) as e:
+            # Catch SystemExit too — copernicusmarine raises it on auth failures
+            error[0] = f'{type(e).__name__}: {e}'
 
     # Run subset in a thread with timeout
     thread = threading.Thread(target=do_subset, daemon=True)
@@ -284,26 +305,12 @@ def main():
     # Suppress copernicusmarine progress bars and info logging
     os.environ['COPERNICUSMARINE_DISABLE_PROGRESS_BAR'] = 'True'
 
-    # Authenticate once at startup
-    username = (os.environ.get('COPERNICUSMARINE_SERVICE_USERNAME')
-                or os.environ.get('COPERNICUS_USERNAME'))
-    password = (os.environ.get('COPERNICUSMARINE_SERVICE_PASSWORD')
-                or os.environ.get('COPERNICUS_PASSWORD'))
-
-    if username and password:
-        try:
-            success = copernicusmarine.login(
-                username=username,
-                password=password,
-            )
-            if success:
-                log('Authenticated with Copernicus Marine Service')
-            else:
-                log('WARNING: Login returned False, continuing with env vars')
-        except Exception as e:
-            log(f'WARNING: Login failed ({e}), relying on cached credentials')
-    else:
-        log('No explicit credentials, relying on cached ~/.copernicusmarine session')
+    # Do NOT call copernicusmarine.login() here!
+    # The CI workflow runs `copernicusmarine login` in a dedicated step before ingestion,
+    # which caches credentials at ~/.copernicusmarine/.copernicusmarine-credentials.
+    # Calling login() again outputs an interactive "overwrite?" prompt to STDOUT,
+    # which corrupts the JSON-per-line protocol and crashes the worker.
+    log('Using cached credentials from CI login step (no worker-level login)')
 
     # Signal readiness
     send_response({'id': 'ready', 'ok': True, 'message': 'worker_ready'})

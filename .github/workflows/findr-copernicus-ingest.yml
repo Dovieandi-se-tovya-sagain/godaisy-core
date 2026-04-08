@@ -8,6 +8,17 @@ on:
   schedule:
     - cron: '0 3,15 * * *'  # Twice daily: 03:00 and 15:00 UTC
   workflow_dispatch:
+    inputs:
+      region:
+        description: 'Single region to test (leave empty for all 9)'
+        required: false
+        default: ''
+        type: string
+      limit:
+        description: 'Max cells to process (0 = all)'
+        required: false
+        default: '0'
+        type: string
 
 concurrency:
   group: findr-copernicus-ingest
@@ -24,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        region: [BAL, MED, BLK, IBI, NWS, ARC, GLO_AM, GLO_AP, GLO_AF]
+        region: ${{ github.event.inputs.region != '' && fromJson(format('["{0}"]', github.event.inputs.region)) || fromJson('["BAL","MED","BLK","IBI","NWS","ARC","GLO_AM","GLO_AP","GLO_AF"]') }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -82,6 +93,7 @@ jobs:
           FINDR_CONDITIONS_DELAY_MS: '200'
           FINDR_CONDITIONS_BATCH_SIZE: '10'
           FINDR_CONDITIONS_REGION: ${{ matrix.region }}
+          FINDR_CONDITIONS_LIMIT: ${{ github.event.inputs.limit != '0' && github.event.inputs.limit || '' }}
         run: |
           echo "=== Ingesting region: ${{ matrix.region }} ==="
           npx tsx scripts/ingestion/ingest-copernicus-data.ts || {
