@@ -1,7 +1,5 @@
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import * as fs from 'fs';
-import * as os from 'os';
+import { spawn, ChildProcess } from 'child_process';
+import { createInterface, Interface as ReadlineInterface } from 'readline';
 import * as path from 'path';
 import {
   CopernicusProvider,
@@ -11,30 +9,250 @@ import {
 } from './types';
 import { getDatasetForCmemsRegion, getDatasetForRegion, type CopernicusDatasetConfig } from './regionRouter';
 
-const execAsync = promisify(exec);
+// ---------------------------------------------------------------------------
+// Persistent Python worker (singleton)
+// ---------------------------------------------------------------------------
+
+interface WorkerRequest {
+  id: string;
+  action: 'subset' | 'ping' | 'shutdown';
+  dataset_id?: string;
+  variables?: string[];
+  minimum_longitude?: number;
+  maximum_longitude?: number;
+  minimum_latitude?: number;
+  maximum_latitude?: number;
+  start_datetime?: string;
+  end_datetime?: string;
+  timeout_seconds?: number;
+}
+
+interface WorkerResponse {
+  id: string;
+  ok: boolean;
+  data?: {
+    datasetId: string;
+    variables: string[];
+    records: Array<{
+      time: string;
+      depth: number;
+      lat: number;
+      lon: number;
+      variables: Record<string, number>;
+    }>;
+    source: string;
+  };
+  error?: string;
+  error_type?: string;
+  message?: string;
+}
+
+class CopernicusWorker {
+  private static instance: CopernicusWorker | null = null;
+  private static startingPromise: Promise<CopernicusWorker> | null = null;
+
+  private process: ChildProcess;
+  private rl: ReadlineInterface;
+  private pending = new Map<string, {
+    resolve: (resp: WorkerResponse) => void;
+    reject: (err: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+  private alive = true;
+  private reqCounter = 0;
+
+  private constructor(proc: ChildProcess, rl: ReadlineInterface) {
+    this.process = proc;
+    this.rl = rl;
+
+    // Route every JSON line from stdout to the matching pending request
+    this.rl.on('line', (line: string) => {
+      let msg: WorkerResponse;
+      try {
+        msg = JSON.parse(line);
+      } catch {
+        console.log(`[worker] non-JSON stdout: ${line}`);
+        return;
+      }
+      const entry = this.pending.get(msg.id);
+      if (entry) {
+        clearTimeout(entry.timer);
+        this.pending.delete(msg.id);
+        entry.resolve(msg);
+      }
+    });
+
+    // Forward worker stderr to console for observability
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString().trim();
+      if (text) console.log(`[worker] ${text}`);
+    });
+
+    // Detect crashes
+    proc.on('exit', (code: number | null) => {
+      this.alive = false;
+      console.log(`[worker] process exited with code ${code}`);
+      // Clean up readline
+      this.rl.removeAllListeners();
+      this.rl.close();
+      // Reject all pending requests
+      for (const [id, entry] of this.pending) {
+        clearTimeout(entry.timer);
+        entry.reject(new Error(`Worker exited (code ${code}) while request ${id} was pending`));
+      }
+      this.pending.clear();
+      if (CopernicusWorker.instance === this) {
+        CopernicusWorker.instance = null;
+        CopernicusWorker.startingPromise = null;
+      }
+    });
+  }
+
+  /** Lazily spawn the worker and wait for it to signal readiness. */
+  static getInstance(): Promise<CopernicusWorker> {
+    if (CopernicusWorker.instance?.alive) {
+      return Promise.resolve(CopernicusWorker.instance);
+    }
+    if (CopernicusWorker.startingPromise) {
+      return CopernicusWorker.startingPromise;
+    }
+
+    CopernicusWorker.startingPromise = new Promise<CopernicusWorker>((resolve, reject) => {
+      const workerScript = path.join(process.cwd(), 'scripts', 'ingestion', 'copernicus-worker.py');
+
+      const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+      const proc = spawn(pythonCmd, [workerScript], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          PYTHONUNBUFFERED: '1',
+          COPERNICUSMARINE_SERVICE_USERNAME: process.env.COPERNICUS_USERNAME || '',
+          COPERNICUSMARINE_SERVICE_PASSWORD: process.env.COPERNICUS_PASSWORD || '',
+        },
+      });
+
+      const rl = createInterface({ input: proc.stdout! });
+      const worker = new CopernicusWorker(proc, rl);
+
+      // Listen for the ready message
+      const onLine = (line: string) => {
+        try {
+          const msg = JSON.parse(line);
+          if (msg.id === 'ready' && msg.ok) {
+            clearTimeout(readyTimeout);
+            rl.removeListener('line', onLine);
+            CopernicusWorker.instance = worker;
+            resolve(worker);
+          }
+        } catch {
+          // ignore non-JSON during startup
+        }
+      };
+      rl.on('line', onLine);
+
+      // Wait for the ready signal (max 30s)
+      const readyTimeout = setTimeout(() => {
+        rl.removeListener('line', onLine);
+        proc.kill();
+        reject(new Error('Worker did not become ready within 30s'));
+      }, 30_000);
+
+      proc.on('error', (err: Error) => {
+        clearTimeout(readyTimeout);
+        reject(new Error(`Failed to spawn worker: ${err.message}`));
+      });
+
+      proc.on('exit', (code: number | null) => {
+        clearTimeout(readyTimeout);
+        if (!CopernicusWorker.instance) {
+          reject(new Error(`Worker exited during startup (code ${code})`));
+        }
+      });
+    });
+
+    CopernicusWorker.startingPromise.catch(() => {
+      CopernicusWorker.startingPromise = null;
+    });
+
+    return CopernicusWorker.startingPromise;
+  }
+
+  /** Send a JSON request and return the matching response. */
+  sendRequest(req: WorkerRequest, timeoutMs: number): Promise<WorkerResponse> {
+    if (!this.alive) {
+      return Promise.reject(new Error('Worker is not alive'));
+    }
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(req.id);
+        reject(new Error(`Worker request ${req.id} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      this.pending.set(req.id, { resolve, reject, timer });
+      this.process.stdin!.write(JSON.stringify(req) + '\n');
+    });
+  }
+
+  /** Gracefully shut down the worker. */
+  static async shutdown(): Promise<void> {
+    const worker = CopernicusWorker.instance;
+    if (!worker?.alive) return;
+
+    try {
+      worker.process.stdin!.write(JSON.stringify({ id: 'shutdown', action: 'shutdown' }) + '\n');
+      // Give it 5s to exit cleanly
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(() => {
+          worker.process.kill();
+          resolve();
+        }, 5_000);
+        worker.process.on('exit', () => {
+          clearTimeout(t);
+          resolve();
+        });
+      });
+    } catch {
+      worker.process.kill();
+    }
+    CopernicusWorker.instance = null;
+    CopernicusWorker.startingPromise = null;
+  }
+
+  nextId(): string {
+    return `req-${++this.reqCounter}`;
+  }
+}
+
+// Graceful cleanup on process exit
+process.on('beforeExit', () => CopernicusWorker.shutdown());
+process.on('SIGINT', () => { CopernicusWorker.shutdown(); });
+process.on('SIGTERM', () => { CopernicusWorker.shutdown(); });
+process.on('exit', () => { CopernicusWorker.shutdown(); });
+
+// ---------------------------------------------------------------------------
+// RealCopernicusProvider
+// ---------------------------------------------------------------------------
 
 /**
- * Real Copernicus Marine Service provider using the CLI tool
+ * Real Copernicus Marine Service provider using a persistent Python worker.
  */
 export class RealCopernicusProvider implements CopernicusProvider {
-  private cliPath: string;
   private region?: string;
   private datasetConfig?: CopernicusDatasetConfig;
 
   constructor(region?: string) {
-    // Assume copernicusmarine is in PATH (installed via pipx)
-    this.cliPath = 'copernicusmarine';
     this.region = region;
-    
+
     if (region) {
       // Try CMEMS region code first (IBI, NWS, BAL, MED, etc.)
       let config = getDatasetForCmemsRegion(region);
-      
+
       // Fallback to ICES region name mapping
       if (!config) {
         config = getDatasetForRegion(region);
       }
-      
+
       if (!config) {
         console.warn(`⚠️  No Copernicus dataset found for region: ${region}`);
       } else {
@@ -46,7 +264,6 @@ export class RealCopernicusProvider implements CopernicusProvider {
 
   async fetchBundle(options: CopernicusFetchOptions): Promise<CopernicusMarineBundle> {
     const { lat, lon, start, end: _end } = options;
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'copernicus-'));
 
     try {
       console.log(`   🌊 Fetching Copernicus data for (${lat}, ${lon})...`);
@@ -96,18 +313,13 @@ export class RealCopernicusProvider implements CopernicusProvider {
 
         for (const padding of paddings) {
           try {
-            const thetaoFile = path.join(tempDir, `thetao_${padding}_d${dayOffset}.nc`);
-            await this.fetchDatasetWithPadding(
+            temperatureData = await this.fetchAndParse(
               temperatureDataset,
-              ['thetao'],  // Explicitly request temperature variable
-              lat,
-              lon,
-              fallbackDateStr,
-              fallbackDateStr,
-              thetaoFile,
+              ['thetao'],
+              lat, lon,
+              fallbackDateStr, fallbackDateStr,
               padding
             );
-            temperatureData = await this.parseNetCDF(thetaoFile, 'physics');
             if (temperatureData && this.hasValidData(temperatureData)) {
               daysBack = dayOffset;
               successfulDate = fallbackDateStr;
@@ -115,6 +327,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
               console.log(`   ✅ Temperature data found with ${padding}° padding (~${Math.round(padding * 111)}km)${ageNote}`);
               break;
             }
+            temperatureData = null;
           } catch (err) {
             const isTimeout = err instanceof Error && err.message.includes('timeout');
             const errorType = isTimeout ? '⏱️  Timeout' : '❌ Error';
@@ -133,18 +346,13 @@ export class RealCopernicusProvider implements CopernicusProvider {
       if (temperatureData) {
         const successfulPadding = paddings.find(_p => temperatureData !== null) || paddings[0];
         try {
-          const salinityFile = path.join(tempDir, `salinity_${successfulPadding}_d${daysBack}.nc`);
-          await this.fetchDatasetWithPadding(
+          salinityData = await this.fetchAndParse(
             salinityDataset,
-            ['so'],  // Explicitly request salinity variable
-            lat,
-            lon,
-            successfulDate,
-            successfulDate,
-            salinityFile,
+            ['so'],
+            lat, lon,
+            successfulDate, successfulDate,
             successfulPadding
           );
-          salinityData = await this.parseNetCDF(salinityFile, 'physics');
           if (salinityData && this.hasValidData(salinityData)) {
             const ageNote = daysBack > 0 ? ` (${daysBack}d old)` : '';
             console.log(`   ✅ Salinity data found with ${successfulPadding}° padding${ageNote}`);
@@ -167,18 +375,13 @@ export class RealCopernicusProvider implements CopernicusProvider {
           const currentsDateStr = currentsDate.toISOString();
 
           try {
-            const currentsFile = path.join(tempDir, `currents_${successfulPadding}_d${dayOffset}.nc`);
-            await this.fetchDatasetWithPadding(
+            currentsData = await this.fetchAndParse(
               currentsDataset,
-              ['uo', 'vo'],  // Eastward and northward currents
-              lat,
-              lon,
-              currentsDateStr,
-              currentsDateStr,
-              currentsFile,
+              ['uo', 'vo'],
+              lat, lon,
+              currentsDateStr, currentsDateStr,
               successfulPadding
             );
-            currentsData = await this.parseNetCDF(currentsFile, 'physics');
             if (currentsData && this.hasValidData(currentsData)) {
               const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
               console.log(`   ✅ Currents data found with ${successfulPadding}° padding${ageNote}`);
@@ -203,23 +406,19 @@ export class RealCopernicusProvider implements CopernicusProvider {
 
         for (const padding of paddings) {
           try {
-            const mldFile = path.join(tempDir, `mld_${padding}_d${dayOffset}.nc`);
-            await this.fetchDatasetWithPadding(
+            mldData = await this.fetchAndParse(
               mldDataset,
-              ['mlotst'],  // Ocean mixed layer thickness (2D, no depth dimension)
-              lat,
-              lon,
-              mldDateStr,
-              mldDateStr,
-              mldFile,
+              ['mlotst'],
+              lat, lon,
+              mldDateStr, mldDateStr,
               padding
             );
-            mldData = await this.parseNetCDF(mldFile, 'physics');
             if (mldData && this.hasValidData(mldData)) {
               const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
               console.log(`   ✅ MLD (mixed layer depth) data found with ${padding}° padding${ageNote}`);
               break;
             }
+            mldData = null;
           } catch (err) {
             const isLastAttempt = dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1] &&
                                  padding === paddings[paddings.length - 1];
@@ -242,18 +441,13 @@ export class RealCopernicusProvider implements CopernicusProvider {
           const transDateStr = transDate.toISOString();
 
           try {
-            const transparencyFile = path.join(tempDir, `transparency_${successfulPadding}_d${dayOffset}.nc`);
-            await this.fetchDatasetWithPadding(
+            transparencyData = await this.fetchAndParse(
               transparencyDataset,
-              ['KD490'],  // Satellite transparency variable (uppercase)
-              lat,
-              lon,
-              transDateStr,
-              transDateStr,
-              transparencyFile,
+              ['KD490'],
+              lat, lon,
+              transDateStr, transDateStr,
               successfulPadding
             );
-            transparencyData = await this.parseNetCDF(transparencyFile, 'biogeochemical');
             if (transparencyData && this.hasValidData(transparencyData)) {
               const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
               console.log(`   ✅ Transparency data (kd490) found with ${successfulPadding}° padding${ageNote}`);
@@ -276,23 +470,19 @@ export class RealCopernicusProvider implements CopernicusProvider {
 
         for (const padding of paddings) {
           try {
-            const bioFile = path.join(tempDir, `bio_${padding}_d${dayOffset}.nc`);
-            await this.fetchDatasetWithPadding(
+            bioData = await this.fetchAndParse(
               bioDataset,
-              [],  // Don't specify variables - let dataset return what it has (chlorophyll, oxygen, nutrients)
-              lat,
-              lon,
-              bgcDateStr,
-              bgcDateStr,
-              bioFile,
+              [],
+              lat, lon,
+              bgcDateStr, bgcDateStr,
               padding
             );
-            bioData = await this.parseNetCDF(bioFile, 'biogeochemical');
             if (bioData && this.hasValidData(bioData)) {
               const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
               console.log(`   ✅ BGC data found with ${padding}° padding (~${Math.round(padding * 111)}km)${ageNote}`);
               break;
             }
+            bioData = null;
           } catch (err) {
             const isTimeout = err instanceof Error && err.message.includes('timeout');
             const errorType = isTimeout ? '⏱️  Timeout' : '❌ Error';
@@ -320,23 +510,19 @@ export class RealCopernicusProvider implements CopernicusProvider {
 
         for (const padding of paddings) {
           try {
-            const pftFile = path.join(tempDir, `pft_${padding}_d${dayOffset}.nc`);
-            await this.fetchDatasetWithPadding(
+            pftData = await this.fetchAndParse(
               pftDataset,
-              ['phyc'],  // Phytoplankton carbon
-              lat,
-              lon,
-              pftDateStr,
-              pftDateStr,
-              pftFile,
+              ['phyc'],
+              lat, lon,
+              pftDateStr, pftDateStr,
               padding
             );
-            pftData = await this.parseNetCDF(pftFile, 'biogeochemical');
             if (pftData && this.hasValidData(pftData)) {
               const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
               console.log(`   ✅ PFT (phytoplankton) data found with ${padding}° padding${ageNote}`);
               break;
             }
+            pftData = null;
           } catch (err) {
             const isLastAttempt = dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1] &&
                                  padding === paddings[paddings.length - 1];
@@ -358,23 +544,19 @@ export class RealCopernicusProvider implements CopernicusProvider {
 
         for (const padding of paddings) {
           try {
-            const planktonFile = path.join(tempDir, `plankton_${padding}_d${dayOffset}.nc`);
-            await this.fetchDatasetWithPadding(
+            planktonData = await this.fetchAndParse(
               planktonDataset,
-              ['zooc'],  // Zooplankton carbon
-              lat,
-              lon,
-              planktonDateStr,
-              planktonDateStr,
-              planktonFile,
+              ['zooc'],
+              lat, lon,
+              planktonDateStr, planktonDateStr,
               padding
             );
-            planktonData = await this.parseNetCDF(planktonFile, 'biogeochemical');
             if (planktonData && this.hasValidData(planktonData)) {
               const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
               console.log(`   ✅ Plankton (zooplankton) data found with ${padding}° padding${ageNote}`);
               break;
             }
+            planktonData = null;
           } catch (err) {
             const isLastAttempt = dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1] &&
                                  padding === paddings[paddings.length - 1];
@@ -398,23 +580,19 @@ export class RealCopernicusProvider implements CopernicusProvider {
 
           for (const padding of paddings) {
             try {
-              const ppFile = path.join(tempDir, `pp_${padding}_d${dayOffset}.nc`);
-              await this.fetchDatasetWithPadding(
+              ppData = await this.fetchAndParse(
                 ppDataset,
-                ['nppv'],  // Net primary production
-                lat,
-                lon,
-                ppDateStr,
-                ppDateStr,
-                ppFile,
+                ['nppv'],
+                lat, lon,
+                ppDateStr, ppDateStr,
                 padding
               );
-              ppData = await this.parseNetCDF(ppFile, 'biogeochemical');
               if (ppData && this.hasValidData(ppData)) {
                 const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
                 console.log(`   ✅ Primary production (nppv) data found with ${padding}° padding${ageNote}`);
                 break;
               }
+              ppData = null;
             } catch (err) {
               const isLastAttempt = dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1] &&
                                    padding === paddings[paddings.length - 1];
@@ -436,23 +614,19 @@ export class RealCopernicusProvider implements CopernicusProvider {
 
         for (const padding of [0.25]) {
           try {
-            const waveFile = path.join(tempDir, `waves_${padding}_d${dayOffset}.nc`);
-            await this.fetchDatasetWithPadding(
+            waveData = await this.fetchAndParse(
               waveDataset,
-              ['VHM0', 'VMDR', 'VTM02'],  // Request key wave variables
-              lat,
-              lon,
-              waveDateStr,
-              waveDateStr,
-              waveFile,
+              ['VHM0', 'VMDR', 'VTM02'],
+              lat, lon,
+              waveDateStr, waveDateStr,
               padding
-            );
-            waveData = await this.parseNetCDF(waveFile, 'waves');
+            ) || undefined;
             if (waveData && this.hasValidData(waveData)) {
               const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
               console.log(`   ✅ Wave data found with ${padding}° padding${ageNote}`);
               break;
             }
+            waveData = undefined;
           } catch (_err) {
             // Waves are optional, don't warn
           }
@@ -570,31 +744,32 @@ export class RealCopernicusProvider implements CopernicusProvider {
     } catch (error) {
       console.error(`   ❌ Error fetching Copernicus data:`, error);
       throw error;
-    } finally {
-      // Clean up temp files
-      fs.rmSync(tempDir, { recursive: true, force: true });
     }
   }
 
   private hasValidData(timeseries: CopernicusTimeseries): boolean {
     // Check if we have at least one record with non-null data
-    return timeseries.records.length > 0 && 
-           timeseries.records.some(r => 
+    return timeseries.records.length > 0 &&
+           timeseries.records.some(r =>
              Object.values(r.variables).some(v => v !== null && v !== undefined && !isNaN(v))
            );
   }
 
-  private async fetchDatasetWithPadding(
+  /**
+   * Send a subset request to the persistent Python worker and return the parsed result.
+   */
+  private async fetchAndParse(
     datasetId: string,
     variables: string[],
     lat: number,
     lon: number,
     start: string,
     end: string,
-    outputFile: string,
     padding: number
-  ): Promise<void> {
-    // Adjust coordinates with specified padding
+  ): Promise<CopernicusTimeseries> {
+    const worker = await CopernicusWorker.getInstance();
+
+    // Calculate bounding box
     const latMin = lat - padding;
     const latMax = lat + padding;
     const lonMin = lon - padding;
@@ -604,298 +779,49 @@ export class RealCopernicusProvider implements CopernicusProvider {
     const startDate = start.split('T')[0];
     const endDate = end.split('T')[0];
 
-    // Build the CLI command with proper quoting
-    // Each argument must be a separate element for proper shell escaping
-    const cmdArgs = [
-      'subset',
-      '--dataset-id', datasetId,
-    ];
-
-    // Only add variable flags if variables are specified
-    if (variables.length > 0) {
-      variables.forEach(v => {
-        cmdArgs.push('--variable', v);
-      });
-    }
-
-    // Split output path into directory + filename (CLI requires them separate)
-    const outputDir = path.dirname(outputFile);
-    const outputName = path.basename(outputFile);
-
-    cmdArgs.push(
-      '--minimum-longitude', lonMin.toString(),
-      '--maximum-longitude', lonMax.toString(),
-      '--minimum-latitude', latMin.toString(),
-      '--maximum-latitude', latMax.toString(),
-      '--start-datetime', startDate,
-      '--end-datetime', endDate,
-      '--output-directory', outputDir,
-      '--output-filename', outputName,
-      '--overwrite',
-      '--disable-progress-bar'
-    );
-
-    // Build command string with proper quoting for shell
-    const cmd = `${this.cliPath} ${cmdArgs.map(arg =>
-      arg.toString().includes(' ') ? `"${arg}"` : arg
-    ).join(' ')}`;
-
     // CI environments need longer timeouts (cold STAC catalogue, auth, download)
     // 90s for initial probe, 120s for larger downloads
     const isProbe = padding <= 0.25;
-    const timeoutMs = isProbe ? 90000 : 120000;
+    const pythonTimeout = isProbe ? 90 : 120; // seconds — passed to worker
+    const nodeTimeout = (pythonTimeout + 10) * 1000; // ms — safety net (extra margin for parse + I/O)
 
-    try {
-      const { stdout, stderr } = await execAsync(cmd, {
-        timeout: timeoutMs,
-        killSignal: 'SIGTERM',
-        env: {
-          ...process.env,
-          PATH: `${process.env.HOME}/.local/bin:${process.env.PATH}`,
-          COPERNICUSMARINE_SERVICE_USERNAME: process.env.COPERNICUS_USERNAME,
-          COPERNICUSMARINE_SERVICE_PASSWORD: process.env.COPERNICUS_PASSWORD,
-        },
-      });
+    const reqId = worker.nextId();
+    const request: WorkerRequest = {
+      id: reqId,
+      action: 'subset',
+      dataset_id: datasetId,
+      variables: variables.length > 0 ? variables : undefined,
+      minimum_longitude: lonMin,
+      maximum_longitude: lonMax,
+      minimum_latitude: latMin,
+      maximum_latitude: latMax,
+      start_datetime: startDate,
+      end_datetime: endDate,
+      timeout_seconds: pythonTimeout,
+    };
 
-      // copernicusmarine outputs progress/info to stderr — only error on actual failures
-      if (stderr) {
-        const stderrLower = stderr.toLowerCase();
-        const hasError = stderrLower.includes('error') || stderrLower.includes('exception') || stderrLower.includes('traceback');
-        const isJustInfo = stderrLower.includes('info') || stderrLower.includes('fetching') || stderrLower.includes('downloaded');
-        if (hasError && !isJustInfo) {
-          console.error(`   ⚠️  CLI stderr: ${stderr.substring(0, 300)}`);
-          throw new Error(stderr.substring(0, 500));
-        }
+    const response = await worker.sendRequest(request, nodeTimeout);
+
+    if (!response.ok) {
+      const errMsg = response.error || 'Unknown worker error';
+      if (response.error_type === 'timeout') {
+        throw new Error(`timeout after ${pythonTimeout}s for ${datasetId}`);
       }
-
-      if (stdout) {
-        console.log(`   ℹ️  CLI stdout: ${stdout.substring(0, 100)}`);
-      }
-    } catch (execError: unknown) {
-      const errMsg = execError instanceof Error ? execError.message : String(execError);
-      const isTimeout = errMsg.includes('SIGTERM') || errMsg.includes('timeout') || errMsg.includes('killed');
-      if (isTimeout) {
-        throw new Error(`timeout after ${timeoutMs / 1000}s for ${datasetId}`);
-      }
-      // Log the actual CLI error for debugging
-      console.error(`   ❌ CLI failed for ${datasetId}: ${errMsg.substring(0, 300)}`);
-      throw execError;
-    }
-  }
-
-  private async parseNetCDF(
-    filePath: string,
-    _dataType: 'physics' | 'biogeochemical' | 'waves'
-  ): Promise<CopernicusTimeseries> {
-    // Use Python with xarray to parse NetCDF
-    const pythonScript = `
-import xarray as xr
-import json
-import sys
-
-def is_valid_value(val, var_name):
-    """
-    Filter out fill values and physically impossible values.
-    CMEMS datasets use various fill values: 9999, 9.96921e+36, -32767, etc.
-    """
-    if val is None:
-        return False
-
-    import numpy as np
-
-    # Check for NaN and infinite values
-    if np.isnan(val) or np.isinf(val):
-        return False
-
-    # Common fill value patterns
-    abs_val = abs(val)
-    if abs_val > 9000:  # e.g., 9999, 9345, 15442, 9.96921e+36
-        return False
-
-    var_lower = var_name.lower()
-
-    # Primary production (nppv) can reach 2000+ mg C/m³/day in productive coastal waters
-    # Must check BEFORE the generic >1000 filter below
-    if 'nppv' in var_lower:
-        return 0 <= val <= 5000
-
-    if abs_val > 1000 and abs_val < 10000:  # e.g., 9999, -32767
-        return False
-
-    # Variable-specific validation (physically plausible ranges)
-
-    # Temperature variables (thetao, to, sst, etc.)
-    if 'temp' in var_lower or 'thetao' in var_lower or 'to' in var_lower or 'sst' in var_lower:
-        if val < -5 or val > 50:  # °C
-            return False
-
-    # Salinity variables (so, sal, salinity, etc.)
-    if 'sal' in var_lower or 'so' in var_lower:
-        if val < 0 or val > 50:  # PSU
-            return False
-
-    # Chlorophyll (chl, chlorophyll, chla)
-    if 'chl' in var_lower:
-        if val < 0 or val > 100:  # mg/m³
-            return False
-
-    # Light attenuation coefficient (kd490, kd, attenuation)
-    if 'kd' in var_lower or 'atten' in var_lower:
-        if val < 0 or val > 10:  # m⁻¹
-            return False
-
-    # Oxygen (o2, oxygen, dissolved_oxygen)
-    if 'o2' in var_lower or 'oxygen' in var_lower:
-        if val < 0 or val > 500:  # mmol/m³
-            return False
-
-    # Nitrate (no3, nitrate)
-    if 'no3' in var_lower or 'nitrate' in var_lower:
-        if val < 0 or val > 100:  # mmol/m³
-            return False
-
-    # Phosphate (po4, phosphate)
-    if 'po4' in var_lower or 'phosphate' in var_lower:
-        if val < 0 or val > 20:  # mmol/m³
-            return False
-
-    # Currents (uo, vo, velocity)
-    if any(x in var_lower for x in ['uo', 'vo', 'velocity', 'current']):
-        if abs_val > 10:  # m/s (10 m/s = 20 knots, extreme)
-            return False
-
-    # Wave height (VHM0, wave_height)
-    if 'vhm' in var_lower or 'wave' in var_lower and 'height' in var_lower:
-        if val < 0 or val > 30:  # meters
-            return False
-
-    # Wave period (VTM, period)
-    if 'vtm' in var_lower or 'period' in var_lower:
-        if val < 0 or val > 30:  # seconds
-            return False
-
-    return True
-
-try:
-    ds = xr.open_dataset('${filePath}')
-
-    # Extract all variables
-    records = []
-
-    # Get dimensions
-    times = ds.time.values if 'time' in ds.dims else []
-    depths = ds.depth.values if 'depth' in ds.dims else [0]
-    lats = ds.latitude.values if 'latitude' in ds.dims else ds.lat.values
-    lons = ds.longitude.values if 'longitude' in ds.dims else ds.lon.values
-
-    # Convert to Python lists
-    import numpy as np
-    times = [str(t) for t in times]
-    depths = [float(d) for d in depths]
-
-    # Filter depths to only keep 0m, 5m, and 10m (within 1m tolerance)
-    target_depths = [0, 5, 10]
-    filtered_depths = []
-    for target in target_depths:
-        # Find closest depth to target
-        closest = min(depths, key=lambda d: abs(d - target)) if depths else None
-        if closest is not None and abs(closest - target) <= 1.5:  # Within 1.5m tolerance
-            if closest not in filtered_depths:  # Avoid duplicates
-                filtered_depths.append(closest)
-    depths = filtered_depths if filtered_depths else [0]  # Fallback to surface if no matches
-
-    lat = float(lats[0] if len(lats.shape) == 1 else lats[0, 0])
-    lon = float(lons[0] if len(lons.shape) == 1 else lons[0, 0])
-
-    # Get variable names (exclude coordinates)
-    var_names = [v for v in ds.data_vars if v not in ['latitude', 'longitude', 'lat', 'lon', 'time', 'depth']]
-
-    # Extract data for each time/depth combination
-    for time_idx, time in enumerate(times):
-        for depth_idx, depth in enumerate(depths):
-            variables = {}
-            for var in var_names:
-                try:
-                    if 'depth' in ds[var].dims:
-                        val = ds[var].isel(time=time_idx, depth=depth_idx).values
-                    else:
-                        val = ds[var].isel(time=time_idx).values
-
-                    # Handle various array shapes - spatial grids need aggregation
-                    if hasattr(val, 'shape') and len(val.shape) >= 2:
-                        # Spatial grid (lat x lon) - take mean of non-NaN values
-                        val = np.nanmean(val)
-                    elif hasattr(val, 'item'):
-                        val = val.item()
-                    elif hasattr(val, '__len__') and len(val) > 0:
-                        val = float(val[0])
-
-                    # Validate value (filter fill values and implausible data)
-                    if is_valid_value(val, var):
-                        # Normalize variable name to lowercase for consistent transformer mapping
-                        variables[var.lower()] = float(val)
-                except Exception as e:
-                    pass
-
-            if variables:  # Only add if we have data
-                records.append({
-                    'time': time,
-                    'depth': depth,
-                    'lat': lat,
-                    'lon': lon,
-                    'variables': variables
-                })
-
-    result = {
-        'datasetId': ds.attrs.get('id', 'unknown'),
-        'variables': var_names,
-        'records': records,
-        'source': 'copernicus'
+      throw new Error(errMsg);
     }
 
-    print(json.dumps(result))
-
-except Exception as e:
-    print(json.dumps({'error': str(e)}), file=sys.stderr)
-    sys.exit(1)
-`;
-
-    const pythonFile = path.join(path.dirname(filePath), 'parse.py');
-    fs.writeFileSync(pythonFile, pythonScript);
-
-    try {
-      const { stdout, stderr } = await execAsync(`python3 ${pythonFile}`, {
-        env: {
-          ...process.env,
-          PATH: `${process.env.HOME}/.local/bin:${process.env.PATH}`,
-          // Pass Copernicus credentials to CLI (using new naming convention)
-          COPERNICUSMARINE_SERVICE_USERNAME: process.env.COPERNICUS_USERNAME,
-          COPERNICUSMARINE_SERVICE_PASSWORD: process.env.COPERNICUS_PASSWORD,
-        },
-      });
-
-      // Only treat stderr as error if it contains actual error JSON
-      // RuntimeWarnings from numpy (e.g., "Mean of empty slice") are normal and should be ignored
-      if (stderr && stderr.includes('"error"')) {
-        try {
-          const errorData = JSON.parse(stderr);
-          if (errorData.error) {
-            throw new Error(`Failed to parse NetCDF: ${errorData.error}`);
-          }
-        } catch (_parseErr) {
-          // If we can't parse as JSON, it's probably just warnings - ignore
-        }
-      }
-
-      if (!stdout || stdout.trim() === '') {
-        throw new Error('Parser returned no output');
-      }
-
-      const result = JSON.parse(stdout);
-      console.log(`   ℹ️  Parsed ${result.records?.length || 0} records with ${result.variables?.length || 0} variables`);
-      return result as CopernicusTimeseries;
-    } finally {
-      fs.unlinkSync(pythonFile);
+    if (!response.data) {
+      throw new Error('Worker returned ok but no data');
     }
+
+    const data = response.data;
+    console.log(`   ℹ️  Parsed ${data.records?.length || 0} records with ${data.variables?.length || 0} variables`);
+
+    return {
+      datasetId: data.datasetId,
+      variables: data.variables,
+      records: data.records,
+      source: 'copernicus',
+    };
   }
 }

@@ -51,6 +51,11 @@ export { TranslatedFishName, TranslatedFishBio, TranslatedText } from './compone
 export { default as CoastalLocationDialog, type BasicLocation } from './components/CoastalLocationDialog';
 // TODO: Add more component exports as needed
 
+// Auth utilities
+export { normalizeEmail, mapAuthError, validateAndCleanSession } from './lib/auth/utils';
+export { signInWithApple, isAppleSignInAvailable } from './lib/auth/appleSignIn';
+export { signInWithGoogleNative, resetGoogleNative, isGoogleNativeAvailable, GOOGLE_NATIVE_ERRORS } from './lib/auth/googleNative';
+
 // Utilities
 export { roundNdp, round0dp, round1dp, round2dp, round3dp, createCacheKey, COORDINATE_PRECISION, CACHE_DURATION_MS } from './lib/utils/coordinates';
 // Weather utilities
