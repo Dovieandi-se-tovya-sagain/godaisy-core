@@ -72,7 +72,9 @@ jobs:
             ~/.copernicusmarine
             ~/.config/copernicusmarine
             ~/.cache/copernicusmarine
-          key: cmems-${{ runner.os }}-week-${{ github.run_number }}
+          key: cmems-${{ runner.os }}-run-${{ github.run_number }}
+          restore-keys: |
+            cmems-${{ runner.os }}-run-
 
       - name: Copernicus CLI login and version check
         env:
@@ -83,7 +85,10 @@ jobs:
           copernicusmarine --version
           echo ""
           echo "=== Login ==="
-          yes | copernicusmarine login --username "$COPERNICUS_USERNAME" --password "$COPERNICUS_PASSWORD"
+          yes | copernicusmarine login --username "$COPERNICUS_USERNAME" --password "$COPERNICUS_PASSWORD" || {
+            echo "⚠️  Login failed (CMEMS auth may be temporarily down)"
+            echo "   Continuing with cached credentials if available..."
+          }
           echo ""
           echo "=== Warm-up catalogue (physics + BGC) ==="
           copernicusmarine describe --dataset-id cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m 2>/dev/null | head -5 || true
