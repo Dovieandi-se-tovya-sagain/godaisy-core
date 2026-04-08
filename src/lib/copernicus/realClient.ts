@@ -126,8 +126,6 @@ class CopernicusWorker {
         env: {
           ...process.env,
           PYTHONUNBUFFERED: '1',
-          COPERNICUSMARINE_SERVICE_USERNAME: process.env.COPERNICUS_USERNAME || '',
-          COPERNICUSMARINE_SERVICE_PASSWORD: process.env.COPERNICUS_PASSWORD || '',
         },
       });
 
