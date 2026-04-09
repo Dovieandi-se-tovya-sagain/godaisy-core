@@ -277,6 +277,9 @@ export class RealCopernicusProvider implements CopernicusProvider {
       const salinityDataset = this.datasetConfig?.salinity || 'cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m';
       const currentsDataset = this.datasetConfig?.currents || 'cmems_mod_glo_phy-cur_anfc_0.083deg_P1D-m';
       const bioDataset = this.datasetConfig?.biogeochemistry || 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m';
+      // Global split BGC-bio doesn't have 'chl' (it's in bgc-pft). Regional bundled datasets include everything.
+      const isSplitBgc = bioDataset.includes('bgc-bio');
+      const bioVariables = isSplitBgc ? ['o2', 'no3', 'po4', 'fe', 'si', 'ph'] : [];
       const transparencyDataset = this.datasetConfig?.transparency || 'cmems_obs-oc_glo_bgc-transp_my_l4-gapfree-multi-4km_P1D';
       const waveDataset = this.datasetConfig?.waves || 'cmems_mod_glo_wav_anfc_0.083deg_PT3H-i';
 
@@ -475,7 +478,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
           try {
             bioData = await this.fetchAndParse(
               bioDataset,
-              ['chl', 'o2', 'no3', 'po4', 'fe', 'si', 'ph'],
+              bioVariables,
               lat, lon,
               bgcDateStr, bgcDateStr,
               padding
@@ -515,7 +518,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
           try {
             pftData = await this.fetchAndParse(
               pftDataset,
-              ['phyc'],
+              ['phyc', 'chl'],
               lat, lon,
               pftDateStr, pftDateStr,
               padding
