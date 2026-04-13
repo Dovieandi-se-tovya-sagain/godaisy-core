@@ -215,6 +215,7 @@ def handle_subset(request):
 
     result = [None]
     error = [None]
+    error_type = [None]
 
     def do_subset():
         try:
@@ -258,7 +259,14 @@ def handle_subset(request):
             result[0] = parse_netcdf(tmp_path)
         except (Exception, SystemExit) as e:
             # Catch SystemExit too — copernicusmarine raises it on auth failures
-            error[0] = f'{type(e).__name__}: {e}'
+            err_str = f'{type(e).__name__}: {e}'
+            err_type = type(e).__name__
+            # Detect variable-not-found errors (should not be retried with different dates)
+            if 'VariableDoesNotExist' in err_type or 'VariableDoesNotExist' in err_str:
+                error[0] = err_str
+                error_type[0] = 'variable_not_found'
+            else:
+                error[0] = err_str
 
     # Run subset in a thread with timeout
     thread = threading.Thread(target=do_subset, daemon=True)
@@ -284,7 +292,7 @@ def handle_subset(request):
             'id': req_id,
             'ok': False,
             'error': error[0],
-            'error_type': 'subset_error'
+            'error_type': error_type[0] or 'subset_error'
         }
 
     if result[0] is None:
