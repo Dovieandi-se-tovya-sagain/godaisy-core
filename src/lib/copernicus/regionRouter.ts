@@ -13,7 +13,8 @@ export interface CopernicusDatasetConfig {
   biogeochemistry: string;
   planktonFunctionalTypes?: string;  // PFT dataset for phytoplankton carbon (phyc)
   zooplankton?: string;  // Plankton dataset for zooplankton carbon (zooc)
-  primaryProduction?: string;  // Primary production dataset for nppv (split BGC models only)
+  nutrients?: string;  // Separate nutrients dataset (no3, po4, si, fe) for split BGC models
+  carbonateChemistry?: string;  // Separate carbonate dataset (ph) for split BGC models
   transparency?: string;  // Satellite ocean color transparency (kd490)
   waves: string;
   region: string;
@@ -52,7 +53,8 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
         biogeochemistry: 'cmems_mod_med_bgc-bio_anfc_4.2km_P1D-m', // Fixed: added -bio suffix, changed resolution
         planktonFunctionalTypes: 'cmems_mod_med_bgc-pft_anfc_4.2km_P1D-m', // Med has its own PFT product
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
-        primaryProduction: 'cmems_mod_med_bgc-pp_anfc_4.2km_P1D-m', // MED split BGC: nppv in separate pp dataset
+        nutrients: 'cmems_mod_med_bgc-nut_anfc_4.2km_P1D-m', // MED split: no3, po4, si, fe
+        carbonateChemistry: 'cmems_mod_med_bgc-car_anfc_4.2km_P1D-m', // MED split: ph, spco2, talk
         transparency: 'cmems_obs-oc_med_bgc-transp_nrt_l3-multi-1km_P1D', // NRT for current data (MY has ~1 week lag)
         waves: 'cmems_mod_glo_wav_anfc_0.083deg_PT3H-i', // Med has no wave product, use GLO
         region: 'Mediterranean Sea',
@@ -91,7 +93,8 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
         biogeochemistry: 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
-        primaryProduction: 'cmems_mod_glo_bgc-pp_anfc_0.25deg_P1D-m', // GLO split BGC: nppv in separate pp dataset
+        nutrients: 'cmems_mod_glo_bgc-nut_anfc_0.25deg_P1D-m', // GLO split: no3, po4, si, fe
+        carbonateChemistry: 'cmems_mod_glo_bgc-car_anfc_0.25deg_P1D-m', // GLO split: ph, spco2, talk
         transparency: 'cmems_obs-oc_atl_bgc-transp_nrt_l3-multi-1km_P1D', // NRT for current data (MY has ~1 week lag)
         waves: 'cmems_mod_glo_wav_anfc_0.083deg_PT3H-i',
         region: 'Northwest European Shelf',
@@ -118,7 +121,8 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
         biogeochemistry: 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
-        primaryProduction: 'cmems_mod_glo_bgc-pp_anfc_0.25deg_P1D-m', // GLO split BGC: nppv in separate pp dataset
+        nutrients: 'cmems_mod_glo_bgc-nut_anfc_0.25deg_P1D-m', // GLO split: no3, po4, si, fe
+        carbonateChemistry: 'cmems_mod_glo_bgc-car_anfc_0.25deg_P1D-m', // GLO split: ph, spco2, talk
         transparency: 'cmems_obs-oc_glo_bgc-transp_nrt_l4-gapfree-multi-4km_P1D', // NRT for current data (MY has ~1 week lag)
         waves: 'cmems_mod_glo_wav_anfc_0.083deg_PT3H-i',
         region: 'Global Ocean',
@@ -191,7 +195,8 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
       biogeochemistry: 'cmems_mod_med_bgc-bio_anfc_4.2km_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_med_bgc-pft_anfc_4.2km_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
-      primaryProduction: 'cmems_mod_med_bgc-pp_anfc_4.2km_P1D-m',
+      nutrients: 'cmems_mod_med_bgc-nut_anfc_4.2km_P1D-m',
+      carbonateChemistry: 'cmems_mod_med_bgc-car_anfc_4.2km_P1D-m',
       transparency: 'cmems_obs-oc_med_bgc-transp_nrt_l3-multi-1km_P1D', // NRT for current data (MY has ~1 week lag)
       waves: 'cmems_mod_glo_wav_anfc_0.083deg_PT3H-i',
       region: 'Mediterranean Sea',
@@ -290,7 +295,8 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
       biogeochemistry: 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
-      primaryProduction: 'cmems_mod_glo_bgc-pp_anfc_0.25deg_P1D-m',
+      nutrients: 'cmems_mod_glo_bgc-nut_anfc_0.25deg_P1D-m',
+      carbonateChemistry: 'cmems_mod_glo_bgc-car_anfc_0.25deg_P1D-m',
       transparency: 'cmems_obs-oc_atl_bgc-transp_nrt_l3-multi-1km_P1D', // NRT for current data (MY has ~1 week lag)
       waves: 'cmems_mod_glo_wav_anfc_0.083deg_PT3H-i',
       region: 'Northwest European Shelf',

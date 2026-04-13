@@ -277,9 +277,10 @@ export class RealCopernicusProvider implements CopernicusProvider {
       const salinityDataset = this.datasetConfig?.salinity || 'cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m';
       const currentsDataset = this.datasetConfig?.currents || 'cmems_mod_glo_phy-cur_anfc_0.083deg_P1D-m';
       const bioDataset = this.datasetConfig?.biogeochemistry || 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m';
-      // Global split BGC-bio doesn't have 'chl' (it's in bgc-pft). Regional bundled datasets include everything.
-      const isSplitBgc = bioDataset.includes('bgc-bio');
-      const bioVariables = isSplitBgc ? ['o2', 'no3', 'po4', 'fe', 'si', 'ph'] : [];
+      // Pass [] to let CMEMS return all variables the dataset has.
+      // Global bgc-bio only has o2+nppv; nutrients (no3,po4,si,fe) are in bgc-nut,
+      // pH is in bgc-car. Regional bundled datasets include everything.
+      const bioVariables: string[] = [];
       const transparencyDataset = this.datasetConfig?.transparency || 'cmems_obs-oc_glo_bgc-transp_my_l4-gapfree-multi-4km_P1D';
       const waveDataset = this.datasetConfig?.waves || 'cmems_mod_glo_wav_anfc_0.083deg_PT3H-i';
 
@@ -302,9 +303,10 @@ export class RealCopernicusProvider implements CopernicusProvider {
       let mldData: CopernicusTimeseries | null = null;
       let transparencyData: CopernicusTimeseries | null = null;
       let bioData: CopernicusTimeseries | null = null;
+      let nutrientData: CopernicusTimeseries | null = null;
+      let carbonateData: CopernicusTimeseries | null = null;
       let pftData: CopernicusTimeseries | null = null;
       let planktonData: CopernicusTimeseries | null = null;
-      let ppData: CopernicusTimeseries | null = null;
       let waveData: CopernicusTimeseries | undefined;
 
       // Try temperature with date fallback THEN padding
@@ -490,6 +492,10 @@ export class RealCopernicusProvider implements CopernicusProvider {
             }
             bioData = null;
           } catch (err) {
+            if (err instanceof Error && err.message.startsWith('VARIABLE_NOT_FOUND:')) {
+              console.warn(`   ⚠️  Variable not found in BGC dataset — skipping`);
+              break;
+            }
             const isTimeout = err instanceof Error && err.message.includes('timeout');
             const errorType = isTimeout ? '⏱️  Timeout' : '❌ Error';
             const errorMsg = err instanceof Error ? err.message : String(err);
@@ -500,6 +506,86 @@ export class RealCopernicusProvider implements CopernicusProvider {
               console.warn(`   📋 BGC Error details: ${errorMsg.substring(0, 200)}`);
             } else if (isTimeout && dayOffset === 0) {
               console.log(`   ⏱️  Timeout at ${padding}° padding, trying next...`);
+            }
+          }
+        }
+      }
+
+      // Try nutrients (no3, po4, si, fe) - separate dataset for split BGC models (GLO, NWS, MED)
+      const nutrientDataset = this.datasetConfig?.nutrients;
+      if (nutrientDataset) {
+        for (const dayOffset of stableDateFallbacks) {
+          if (nutrientData) break;
+
+          const nutDate = new Date(start);
+          nutDate.setDate(nutDate.getDate() - dayOffset);
+          const nutDateStr = nutDate.toISOString();
+
+          for (const padding of paddings) {
+            try {
+              nutrientData = await this.fetchAndParse(
+                nutrientDataset,
+                ['no3', 'po4', 'si', 'fe'],
+                lat, lon,
+                nutDateStr, nutDateStr,
+                padding
+              );
+              if (nutrientData && this.hasValidData(nutrientData)) {
+                const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
+                console.log(`   ✅ Nutrient data (no3, po4, si, fe) found with ${padding}° padding${ageNote}`);
+                break;
+              }
+              nutrientData = null;
+            } catch (err) {
+              if (err instanceof Error && err.message.startsWith('VARIABLE_NOT_FOUND:')) {
+                console.warn(`   ⚠️  Variable not found in nutrients dataset — skipping`);
+                break;
+              }
+              const isLastAttempt = dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1] &&
+                                   padding === paddings[paddings.length - 1];
+              if (isLastAttempt) {
+                console.warn(`   ⚠️  No nutrient data available`);
+              }
+            }
+          }
+        }
+      }
+
+      // Try carbonate chemistry (ph) - separate dataset for split BGC models (GLO, NWS, MED)
+      const carbonateDataset = this.datasetConfig?.carbonateChemistry;
+      if (carbonateDataset) {
+        for (const dayOffset of stableDateFallbacks) {
+          if (carbonateData) break;
+
+          const carDate = new Date(start);
+          carDate.setDate(carDate.getDate() - dayOffset);
+          const carDateStr = carDate.toISOString();
+
+          for (const padding of paddings) {
+            try {
+              carbonateData = await this.fetchAndParse(
+                carbonateDataset,
+                ['ph'],
+                lat, lon,
+                carDateStr, carDateStr,
+                padding
+              );
+              if (carbonateData && this.hasValidData(carbonateData)) {
+                const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
+                console.log(`   ✅ Carbonate chemistry (pH) data found with ${padding}° padding${ageNote}`);
+                break;
+              }
+              carbonateData = null;
+            } catch (err) {
+              if (err instanceof Error && err.message.startsWith('VARIABLE_NOT_FOUND:')) {
+                console.warn(`   ⚠️  Variable not found in carbonate dataset — skipping`);
+                break;
+              }
+              const isLastAttempt = dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1] &&
+                                   padding === paddings[paddings.length - 1];
+              if (isLastAttempt) {
+                console.warn(`   ⚠️  No carbonate chemistry data available`);
+              }
             }
           }
         }
@@ -530,6 +616,10 @@ export class RealCopernicusProvider implements CopernicusProvider {
             }
             pftData = null;
           } catch (err) {
+            if (err instanceof Error && err.message.startsWith('VARIABLE_NOT_FOUND:')) {
+              console.warn(`   ⚠️  Variable not found in PFT dataset — skipping`);
+              break;
+            }
             const isLastAttempt = dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1] &&
                                  padding === paddings[paddings.length - 1];
             if (isLastAttempt) {
@@ -564,47 +654,14 @@ export class RealCopernicusProvider implements CopernicusProvider {
             }
             planktonData = null;
           } catch (err) {
+            if (err instanceof Error && err.message.startsWith('VARIABLE_NOT_FOUND:')) {
+              console.warn(`   ⚠️  Variable not found in plankton dataset — skipping`);
+              break;
+            }
             const isLastAttempt = dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1] &&
                                  padding === paddings[paddings.length - 1];
             if (isLastAttempt) {
               console.warn(`   ⚠️  No plankton (zooplankton) data available`);
-            }
-          }
-        }
-      }
-
-      // Try primary production (nppv) - separate dataset from bgc-bio in split BGC models (GLO, NWS, MED)
-      // For bundled regional models (BAL, BLK, IBI, ARC), nppv comes from the main BGC fetch
-      const ppDataset = this.datasetConfig?.primaryProduction;
-      if (ppDataset) {
-        for (const dayOffset of stableDateFallbacks) {
-          if (ppData) break;
-
-          const ppDate = new Date(start);
-          ppDate.setDate(ppDate.getDate() - dayOffset);
-          const ppDateStr = ppDate.toISOString();
-
-          for (const padding of paddings) {
-            try {
-              ppData = await this.fetchAndParse(
-                ppDataset,
-                ['nppv'],
-                lat, lon,
-                ppDateStr, ppDateStr,
-                padding
-              );
-              if (ppData && this.hasValidData(ppData)) {
-                const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
-                console.log(`   ✅ Primary production (nppv) data found with ${padding}° padding${ageNote}`);
-                break;
-              }
-              ppData = null;
-            } catch (err) {
-              const isLastAttempt = dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1] &&
-                                   padding === paddings[paddings.length - 1];
-              if (isLastAttempt) {
-                console.warn(`   ⚠️  No primary production (nppv) data available`);
-              }
             }
           }
         }
@@ -694,6 +751,34 @@ export class RealCopernicusProvider implements CopernicusProvider {
         }
       }
 
+      // Merge nutrient data (no3, po4, si, fe) into biogeochemical data
+      if (nutrientData && nutrientData.records.length > 0) {
+        if (bioData) {
+          bioData.variables = [...bioData.variables, ...nutrientData.variables];
+          bioData.records.forEach((record, idx) => {
+            if (nutrientData!.records[idx]) {
+              record.variables = { ...record.variables, ...nutrientData!.records[idx].variables };
+            }
+          });
+        } else {
+          bioData = nutrientData;
+        }
+      }
+
+      // Merge carbonate chemistry (ph) into biogeochemical data
+      if (carbonateData && carbonateData.records.length > 0) {
+        if (bioData) {
+          bioData.variables = [...bioData.variables, ...carbonateData.variables];
+          bioData.records.forEach((record, idx) => {
+            if (carbonateData!.records[idx]) {
+              record.variables = { ...record.variables, ...carbonateData!.records[idx].variables };
+            }
+          });
+        } else {
+          bioData = carbonateData;
+        }
+      }
+
       // Merge PFT (phytoplankton carbon) into biogeochemical data
       if (pftData && pftData.records.length > 0) {
         if (bioData) {
@@ -719,20 +804,6 @@ export class RealCopernicusProvider implements CopernicusProvider {
           });
         } else {
           bioData = planktonData;
-        }
-      }
-
-      // Merge primary production (nppv) into biogeochemical data
-      if (ppData && ppData.records.length > 0) {
-        if (bioData) {
-          bioData.variables = [...bioData.variables, ...ppData.variables];
-          bioData.records.forEach((record, idx) => {
-            if (ppData!.records[idx]) {
-              record.variables = { ...record.variables, ...ppData!.records[idx].variables };
-            }
-          });
-        } else {
-          bioData = ppData;
         }
       }
 
@@ -812,6 +883,9 @@ export class RealCopernicusProvider implements CopernicusProvider {
       const errMsg = response.error || 'Unknown worker error';
       if (response.error_type === 'timeout') {
         throw new Error(`timeout after ${pythonTimeout}s for ${datasetId}`);
+      }
+      if (response.error_type === 'variable_not_found') {
+        throw new Error(`VARIABLE_NOT_FOUND: ${errMsg}`);
       }
       throw new Error(errMsg);
     }
