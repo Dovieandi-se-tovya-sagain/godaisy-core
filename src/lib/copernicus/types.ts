@@ -126,6 +126,10 @@ export interface CopernicusFetchOptions {
   start: string; // ISO timeframe
   end: string;
   depthLevels?: number[];
+  /** If true, skip all remaining variable fetches when temperature returns no data.
+   *  Coastal cells whose center is on land return NaN for ALL variables —
+   *  this avoids ~10 wasted API calls (~70s) per dead cell. */
+  skipIfNoTemp?: boolean;
 }
 
 export interface CopernicusProvider {

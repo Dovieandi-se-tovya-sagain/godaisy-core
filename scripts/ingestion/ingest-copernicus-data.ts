@@ -78,6 +78,15 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// Cells where BGC/wave data exists despite no temperature data (land-adjacent edge cases).
+// These must NOT be skipped when temperature returns nothing.
+const NO_TEMP_EXCEPTION_CELLS = new Set([
+  'G025_N4850W12225', 'G025_N4800W12300', 'G025_N4800W12275', 'G025_N4800W12250',
+  'G025_N4800W12225', 'G025_N7075E02775', 'G025_N6725E01500', 'G025_N6975E01900',
+  'G025_N2675E11975', 'G025_N4825W12225', 'G025_N3575W00575', 'G025_N3625W00575',
+  'G025_N4375W00575', 'G025_N4575E01225', 'G025_N3600W00575',
+]);
+
 // ─── CMEMS Region Assignment ─────────────────────────────────────────────────
 // Determines which regional Copernicus model to query for a given lat/lon.
 // Regional models have higher resolution than GLOBAL; GLOBAL is the fallback.
@@ -238,7 +247,8 @@ interface GridConditionsRow {
 async function fetchCopernicusData(
   lat: number,
   lon: number,
-  cmemsRegion?: string
+  cmemsRegion?: string,
+  cellId?: string
 ): Promise<CopernicusMarineSnapshot | null> {
   try {
     if (USE_MOCK) {
@@ -260,6 +270,10 @@ async function fetchCopernicusData(
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
 
+      // Skip remaining variables if temperature returns nothing (land cell optimisation).
+      // Exception cells have BGC/wave data despite no temp — never skip those.
+      const skipIfNoTemp = cellId ? !NO_TEMP_EXCEPTION_CELLS.has(cellId) : false;
+
       // Try regional provider first if a region is specified
       if (cmemsRegion) {
         try {
@@ -270,6 +284,7 @@ async function fetchCopernicusData(
             lon,
             start: yesterday.toISOString(),
             end: yesterday.toISOString(),
+            skipIfNoTemp,
           });
 
           const marineData = toCopernicusMarineData(bundle);
@@ -294,6 +309,7 @@ async function fetchCopernicusData(
         lon,
         start: yesterday.toISOString(),
         end: yesterday.toISOString(),
+        skipIfNoTemp,
       });
 
       const marineData = toCopernicusMarineData(bundle);
@@ -400,10 +416,33 @@ async function ingestGridCell(cell: GridCell): Promise<boolean> {
   console.log(`📍 ${rectangle_code}: (${center_lat.toFixed(2)}, ${center_lon.toFixed(2)})`);
 
   // Fetch Copernicus data
-  const snapshot = await fetchCopernicusData(center_lat, center_lon, cmems_region);
+  const snapshot = await fetchCopernicusData(center_lat, center_lon, cmems_region, rectangle_code);
 
   if (!snapshot) {
     console.log(`   ❌ No Copernicus data available`);
+
+    // Increment failure counter; flag as dead after 20 consecutive failures
+    const { data: cellRow } = await supabase
+      .from('grid_conditions_latest')
+      .select('ingestion_failures')
+      .eq('cell_id', rectangle_code)
+      .maybeSingle();
+
+    const failures = (cellRow?.ingestion_failures ?? 0) + 1;
+    const failUpdate: Record<string, unknown> = { ingestion_failures: failures };
+    if (failures >= 20) {
+      failUpdate.dead_since = new Date().toISOString();
+      console.log(`   💀 Cell flagged as dead after ${failures} consecutive failures`);
+    }
+    const { error: failError } = await supabase
+      .from('grid_conditions_latest')
+      .update(failUpdate)
+      .eq('cell_id', rectangle_code);
+
+    if (failError) {
+      console.log(`   ⚠️  Failed to update failure counter: ${failError.message}`);
+    }
+
     return false;
   }
 
@@ -420,7 +459,10 @@ async function ingestGridCell(cell: GridCell): Promise<boolean> {
   if (existing) {
     // Update existing record — only overwrite non-null fields to preserve cached data
     const nonNullUpdate = buildNonNullUpdate(row);
-    const fieldsUpdated = Object.keys(nonNullUpdate).length - 2; // minus collected_at + sources
+    // Reset failure tracking on successful data fetch
+    nonNullUpdate.ingestion_failures = 0;
+    nonNullUpdate.dead_since = null;
+    const fieldsUpdated = Object.keys(nonNullUpdate).length - 4; // minus collected_at, sources, ingestion_failures, dead_since
 
     const { error } = await supabase
       .from('grid_conditions_latest')
@@ -437,7 +479,7 @@ async function ingestGridCell(cell: GridCell): Promise<boolean> {
     // Insert new row (cell exists in grid_025deg but not yet in conditions)
     const { error } = await supabase
       .from('grid_conditions_latest')
-      .insert(row);
+      .insert({ ...row, ingestion_failures: 0, dead_since: null });
 
     if (error) {
       console.log(`   ❌ Insert failed: ${error.message}`);
@@ -473,7 +515,7 @@ async function main() {
 
   const { data: knownCells, error: knownError } = await supabase
     .from('grid_conditions_latest')
-    .select('cell_id')
+    .select('cell_id, dead_since')
     .like('cell_id', 'G025_%');
 
   if (knownError || !knownCells) {
@@ -481,8 +523,27 @@ async function main() {
     process.exit(1);
   }
 
+  // Filter out dead cells (skip unless FORCE_REFRESH or dead_since > 30 days ago = monthly retry)
+  let deadSkipped = 0;
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const liveCells = FORCE_REFRESH
+    ? knownCells
+    : knownCells.filter(c => {
+        if (!c.dead_since) return true; // alive
+        // Monthly retry: allow cells dead for > 30 days
+        if (new Date(c.dead_since) < thirtyDaysAgo) return true;
+        deadSkipped++;
+        return false;
+      });
+
+  if (deadSkipped > 0) {
+    console.log(`   💀 ${deadSkipped} dead cells skipped (retry after 30 days)`);
+  }
+
   // Deduplicate cell IDs
-  const uniqueCellIds = [...new Set(knownCells.map(c => c.cell_id))];
+  const uniqueCellIds = [...new Set(liveCells.map(c => c.cell_id))];
   console.log(`   Found ${uniqueCellIds.length} unique G025_ cells`);
 
   // Get coordinates from rectangles_025deg_api
@@ -675,6 +736,7 @@ async function main() {
   console.log(`✅ Success: ${successCount}/${totalToProcess} grid cells processed`);
   console.log(`❌ Failed: ${failCount}/${totalToProcess} grid cells`);
   console.log(`⏭️  Skipped: ${skippedCount} cells (fresh data <${FRESHNESS_HOURS}h old)`);
+  console.log(`💀 Dead cells skipped: ${deadSkipped}`);
   console.log(`📊 Success rate: ${totalToProcess > 0 ? ((successCount / totalToProcess) * 100).toFixed(1) : '0.0'}% (97-99% expected)`);
   console.log(`⏱️  Total time: ${totalTime}s (${avgRate} cells/sec)`);
   console.log(`\n🎯 0.25° Grid Strategy:`);
