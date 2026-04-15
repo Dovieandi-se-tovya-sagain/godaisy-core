@@ -266,7 +266,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
   }
 
   async fetchBundle(options: CopernicusFetchOptions): Promise<CopernicusMarineBundle> {
-    const { lat, lon, start, end: _end } = options;
+    const { lat, lon, start, end: _end, skipIfNoTemp } = options;
 
     try {
       console.log(`   🌊 Fetching Copernicus data for (${lat}, ${lon})...`);
@@ -290,9 +290,10 @@ export class RealCopernicusProvider implements CopernicusProvider {
       const paddings = [0.25]; // degrees (~28km) - single attempt before global fallback
 
       // Date fallback strategy: try earlier dates when data is unavailable
-      // Stable data (temp/salinity/BGC/transparency): up to 3 days back
+      // With twice-daily runs, going back more than 1 day is wasteful —
+      // older data would already have been fetched by a previous run.
       // Dynamic data (currents/waves): max 1 day back
-      const stableDateFallbacks = [0, 1, 2, 3]; // days back for stable data
+      const stableDateFallbacks = [0, 1]; // days back for stable data
       const dynamicDateFallbacks = [0, 1]; // days back for dynamic data
       let successfulDate: string = start;
       let daysBack = 0;
@@ -348,6 +349,16 @@ export class RealCopernicusProvider implements CopernicusProvider {
             }
           }
         }
+      }
+
+      // Early exit: if temperature returned nothing and skipIfNoTemp is set,
+      // this cell's center is likely on land — skip remaining ~10 API calls (~70s saved)
+      if (!temperatureData && skipIfNoTemp) {
+        console.log(`   ⏩ No temperature data — skipping remaining variables (land cell)`);
+        return {
+          physics: { datasetId: '', variables: [], records: [], source: 'copernicus' },
+          generatedAt: new Date().toISOString(),
+        };
       }
 
       // Try salinity with same date/padding as temperature
