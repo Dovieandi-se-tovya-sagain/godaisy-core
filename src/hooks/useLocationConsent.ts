@@ -2,7 +2,8 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase/client';
+import { authClient } from '../lib/supabase/authClient';
+import { authFetch } from '../lib/supabase/authFetch';
 import type { User } from '@supabase/supabase-js';
 
 export interface LocationPreferences {
@@ -55,14 +56,14 @@ export function useLocationConsent(): LocationConsentState & {
   // Check auth state
   useEffect(() => {
     const checkAuth = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await authClient.auth.getUser();
       setUser(user);
     };
-    
+
     checkAuth();
-    
+
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = authClient.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
     });
     
@@ -77,7 +78,7 @@ export function useLocationConsent(): LocationConsentState & {
         
         // Try to load from database first
         if (user) {
-          const response = await fetch('/api/user/location-preferences');
+          const response = await authFetch('/api/user/location-preferences');
           if (response.ok) {
             const preferences = await response.json();
             setState(prev => ({
@@ -141,7 +142,7 @@ export function useLocationConsent(): LocationConsentState & {
     try {
       // Save to database if authenticated
       if (user) {
-        await fetch('/api/user/location-preferences', {
+        await authFetch('/api/user/location-preferences', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newPreferences)
