@@ -7,6 +7,7 @@ export { UserPreferencesProvider, useUserPreferences } from './contexts/UserPref
 
 // Supabase clients
 export { authClient } from './lib/supabase/authClient';
+export { authFetch } from './lib/supabase/authFetch';
 export { createDataClient } from './lib/supabase/dataClient';
 export type { DataClientConfig } from './lib/supabase/dataClient';
 export { getSupabaseServerClient } from './lib/supabase/serverClient';

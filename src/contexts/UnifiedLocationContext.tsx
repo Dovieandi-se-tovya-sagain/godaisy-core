@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { SavedLocation, LocationSlot, LocationSource } from '../lib/multiLocation';
 import { toLegacyFormat as convertToLegacy } from '../lib/multiLocation';
+import { authFetch } from '../lib/supabase/authFetch';
 
 /**
  * Legacy format for backward compatibility
@@ -211,14 +212,9 @@ type RemoteUpsertResult =
   | { ok: false; reason: 'unauthorized' };
 
 async function upsertRemoteLocationBySlot(input: UpdateLocationBySlotInput): Promise<RemoteUpsertResult> {
-  // Ensure session is fresh before making request (fixes SameSite=Lax cookie issues after OAuth)
-  const { supabase } = await import('../lib/supabase/client');
-  await supabase.auth.getSession();
-
-  const res = await fetch('/api/user/location', {
+  const res = await authFetch('/api/user/location', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin', // Explicitly include cookies
     body: JSON.stringify({
       slot: input.slot,
       name: input.name,
@@ -232,7 +228,7 @@ async function upsertRemoteLocationBySlot(input: UpdateLocationBySlotInput): Pro
   });
 
   if (res.status === 401) {
-    console.warn('[UnifiedLocation] POST failed with 401 despite session refresh');
+    console.warn('[UnifiedLocation] POST /api/user/location returned 401 — Bearer token missing or invalid');
     return { ok: false, reason: 'unauthorized' };
   }
 
@@ -247,9 +243,8 @@ async function upsertRemoteLocationBySlot(input: UpdateLocationBySlotInput): Pro
 
 async function loadRemoteLocations(): Promise<StoredState | null> {
   try {
-    const res = await fetch('/api/user/location?multiLocation=true', {
+    const res = await authFetch('/api/user/location?multiLocation=true', {
       method: 'GET',
-      credentials: 'same-origin' // Explicitly include cookies
     });
 
     if (res.status === 401) {
@@ -279,7 +274,7 @@ async function loadRemoteLocations(): Promise<StoredState | null> {
 async function setRemoteActiveLocation(locationId: string): Promise<void> {
   // For now, we'll implement this by re-saving the location
   // In the future, we could add a dedicated endpoint for this
-  const res = await fetch('/api/user/location?multiLocation=true', { method: 'GET' });
+  const res = await authFetch('/api/user/location?multiLocation=true', { method: 'GET' });
   if (!res.ok) throw new Error('Failed to fetch locations');
 
   const { locations } = (await res.json()) as { locations: SavedLocation[] };
@@ -287,7 +282,7 @@ async function setRemoteActiveLocation(locationId: string): Promise<void> {
   if (!location) throw new Error('Location not found');
 
   // Re-save to make it active
-  await fetch('/api/user/location', {
+  await authFetch('/api/user/location', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -304,7 +299,7 @@ async function setRemoteActiveLocation(locationId: string): Promise<void> {
 }
 
 async function deleteRemoteLocation(locationId: string): Promise<void> {
-  const res = await fetch(`/api/user/location?locationId=${locationId}`, {
+  const res = await authFetch(`/api/user/location?locationId=${locationId}`, {
     method: 'DELETE',
   });
 
@@ -394,7 +389,7 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
     persistState(null);
     setLastError(null);
     try {
-      await fetch('/api/user/location', { method: 'DELETE' });
+      await authFetch('/api/user/location', { method: 'DELETE' });
     } catch (error) {
       console.warn('[UnifiedLocation] Remote clear failed', error);
     }
