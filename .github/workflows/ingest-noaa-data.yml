@@ -1,0 +1,128 @@
+name: Ingest NOAA OISST Data
+
+on:
+  schedule:
+    # Run every 3 hours at :15 past the hour (reduced from hourly to avoid NOAA rate limiting)
+    - cron: '15 */3 * * *'
+  workflow_dispatch:
+    inputs:
+      region:
+        description: 'Region to ingest'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - california
+          - florida
+          - newyork
+          - gulf
+          - pacific-nw
+          - hawaii
+          - alaska
+          - canada-west
+          - canada-east
+          - americas
+      limit:
+        description: 'Max cells per region'
+        required: false
+        default: '50'
+        type: string
+
+jobs:
+  ingest-noaa:
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'Dovieandi-se-tovya-sagain/godaisy-core' }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Set up environment
+        run: |
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env.local
+          echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" >> .env.local
+
+      - name: Ingest California (100 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'california' || github.event_name == 'schedule'
+        run: |
+          echo "🌊 Ingesting California coastal grids..."
+          npx tsx scripts/ingestion/call-ingest-function.ts --california --limit=100
+
+      - name: Ingest Florida (100 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'florida' || github.event_name == 'schedule'
+        run: |
+          echo "🌊 Ingesting Florida coastal grids..."
+          npx tsx scripts/ingestion/call-ingest-function.ts --florida --limit=100
+
+      - name: Ingest New York (100 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'newyork' || github.event_name == 'schedule'
+        run: |
+          echo "🌊 Ingesting New York coastal grids..."
+          npx tsx scripts/ingestion/call-ingest-function.ts --newyork --limit=100
+
+      - name: Ingest Gulf of Mexico (100 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'gulf' || github.event_name == 'schedule'
+        run: |
+          echo "🌊 Ingesting Gulf of Mexico grids..."
+          npx tsx scripts/ingestion/call-ingest-function.ts --gulf --limit=100
+
+      - name: Ingest Pacific Northwest (100 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'pacific-nw'
+        run: |
+          echo "🌊 Ingesting Pacific Northwest grids..."
+          npx tsx scripts/ingestion/call-ingest-function.ts --pacific-nw --limit=100
+
+      - name: Ingest Hawaii (100 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'hawaii'
+        run: |
+          echo "🌊 Ingesting Hawaii grids..."
+          npx tsx scripts/ingestion/call-ingest-function.ts --hawaii --limit=100
+
+      - name: Ingest Alaska (150 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'alaska'
+        run: |
+          echo "🌊 Ingesting Alaska grids..."
+          npx tsx scripts/ingestion/call-ingest-function.ts --alaska --limit=150
+
+      - name: Ingest Canada West Coast (100 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'canada-west'
+        run: |
+          echo "🌊 Ingesting Canada West Coast grids..."
+          npx tsx scripts/ingestion/call-ingest-function.ts --canada-west --limit=100
+
+      - name: Ingest Canada East Coast (100 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'canada-east'
+        run: |
+          echo "🌊 Ingesting Canada East Coast grids..."
+          npx tsx scripts/ingestion/call-ingest-function.ts --canada-east --limit=100
+
+      - name: Check coverage
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          echo "📊 Checking current data coverage..."
+          npx tsx -e "(async () => { const { createClient } = await import('@supabase/supabase-js'); const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY); const { count: totalCount } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }); const { count: noaaCountOld } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).contains('sources', ['ncdcOisst21Agg_LonPM180.sst']); const { count: noaaCountNew } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).contains('sources', ['noaacwBLENDEDsstDaily.analysed_sst']); const noaaCount = noaaCountOld + noaaCountNew; const { count: mockCount } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).contains('sources', ['MOCK_DATA_FOR_TESTING']); console.log('📊 Data Coverage Summary:'); console.log('  Total grids with data: ' + totalCount + ' / 65,884 (' + (totalCount/65884*100).toFixed(2) + '%'); console.log('  Real NOAA grids (old dataset): ' + noaaCountOld); console.log('  Real NOAA grids (new dataset): ' + noaaCountNew); console.log('  Real NOAA grids (total): ' + noaaCount); console.log('  Mock data grids: ' + mockCount); console.log('  Real data coverage: ' + ((noaaCount/(noaaCount+mockCount))*100).toFixed(1) + '%'); })()"
+
+      - name: Report status
+        if: always()
+        run: |
+          echo "Job status: ${{ job.status }}"
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ NOAA data ingestion workflow completed successfully"
+          else
+            echo "❌ NOAA data ingestion workflow encountered failures. Check logs above for details."
+          fi
+          echo "See coverage summary above for current status"
