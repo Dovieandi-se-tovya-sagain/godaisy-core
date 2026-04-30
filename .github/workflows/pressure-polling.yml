@@ -1,0 +1,54 @@
+name: Pressure Snapshot Polling (8x daily)
+
+# Purpose: Populate pressure_snapshots table with time-series data for Phase 2 pressure trend predictions
+# Runs every 3 hours (8x daily) to maintain 6-hour lookback period for trend calculations
+# Data source: MET Norway Locationforecast API (free, no auth required)
+
+on:
+  schedule:
+    # Every 3 hours at :15 minutes past the hour (offset from other cron jobs)
+    - cron: '15 */3 * * *'
+  workflow_dispatch: # Allow manual triggers
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  poll-pressure:
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'Dovieandi-se-tovya-sagain/godaisy-core' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Poll pressure snapshots
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          echo "🌡️  Starting pressure snapshot polling..."
+          npx tsx scripts/ingestion/poll-pressure-snapshots.ts
+          echo "✅ Pressure polling complete"
+
+      - name: Report success
+        if: success()
+        run: |
+          echo "✅ Pressure snapshot polling completed successfully"
+          echo "   Data available for Phase 2 pressure trend predictions"
+
+      - name: Report failure
+        if: failure()
+        run: |
+          echo "❌ Pressure snapshot polling failed"
+          echo "   Phase 2 pressure trends may not work correctly"
+          exit 1
