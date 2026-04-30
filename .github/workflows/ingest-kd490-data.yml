@@ -1,0 +1,127 @@
+name: Ingest Kd490 Data
+
+on:
+  schedule:
+    # Run every 3 hours at :45 past the hour
+    - cron: '45 */3 * * *'
+  workflow_dispatch:
+    inputs:
+      region:
+        description: 'Region to ingest'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - california
+          - florida
+          - newyork
+          - gulf
+          - pacific-nw
+          - hawaii
+          - alaska
+          - canada-west
+          - canada-east
+      limit:
+        description: 'Max cells per region'
+        required: false
+        default: '50'
+        type: string
+
+jobs:
+  ingest-kd490:
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'Dovieandi-se-tovya-sagain/godaisy-core' }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Set up environment
+        run: |
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env.local
+          echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" >> .env.local
+
+      - name: Ingest California (100 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'california' || github.event_name == 'schedule'
+        run: |
+          echo "🌊 Ingesting California Kd490..."
+          npx tsx scripts/ingestion/test-kd490-ingestion.ts --california --limit=100
+
+      - name: Ingest Florida (100 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'florida' || github.event_name == 'schedule'
+        run: |
+          echo "🌊 Ingesting Florida Kd490..."
+          npx tsx scripts/ingestion/test-kd490-ingestion.ts --florida --limit=100
+
+      - name: Ingest New York (100 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'newyork' || github.event_name == 'schedule'
+        run: |
+          echo "🌊 Ingesting New York Kd490..."
+          npx tsx scripts/ingestion/test-kd490-ingestion.ts --newyork --limit=100
+
+      - name: Ingest Gulf of Mexico (100 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'gulf'
+        run: |
+          echo "🌊 Ingesting Gulf of Mexico Kd490..."
+          npx tsx scripts/ingestion/test-kd490-ingestion.ts --gulf --limit=100
+
+      - name: Ingest Pacific Northwest (100 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'pacific-nw'
+        run: |
+          echo "🌊 Ingesting Pacific Northwest Kd490..."
+          npx tsx scripts/ingestion/test-kd490-ingestion.ts --pacific-nw --limit=100
+
+      - name: Ingest Hawaii (100 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'hawaii'
+        run: |
+          echo "🌊 Ingesting Hawaii Kd490..."
+          npx tsx scripts/ingestion/test-kd490-ingestion.ts --hawaii --limit=100
+
+      - name: Ingest Alaska (150 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'alaska'
+        run: |
+          echo "🌊 Ingesting Alaska Kd490..."
+          npx tsx scripts/ingestion/test-kd490-ingestion.ts --alaska --limit=150
+
+      - name: Ingest Canada West Coast (100 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'canada-west'
+        run: |
+          echo "🌊 Ingesting Canada West Coast Kd490..."
+          npx tsx scripts/ingestion/test-kd490-ingestion.ts --canada-west --limit=100
+
+      - name: Ingest Canada East Coast (100 grids)
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'canada-east'
+        run: |
+          echo "🌊 Ingesting Canada East Coast Kd490..."
+          npx tsx scripts/ingestion/test-kd490-ingestion.ts --canada-east --limit=100
+
+      - name: Check coverage
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          echo "📊 Checking Kd490 data coverage..."
+          npx tsx -e "(async () => { const { createClient } = await import('@supabase/supabase-js'); const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY); const { count: totalCount } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }); const { count: kd490Count } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).contains('sources', ['erdMH1kd490mday.k490']); const { count: nonNullCount } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).not('kd490', 'is', null); console.log('📊 Kd490 Data Coverage:'); console.log('  Total grids with any data: ' + totalCount + ' / 65,884'); console.log('  Grids with Kd490 source: ' + kd490Count); console.log('  Grids with non-null Kd490: ' + nonNullCount); console.log('  Coverage: ' + ((kd490Count/65884*100).toFixed(2)) + '%'); })()"
+
+      - name: Report status
+        if: always()
+        run: |
+          echo "Job status: ${{ job.status }}"
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Kd490 data ingestion workflow completed successfully"
+          else
+            echo "❌ Kd490 data ingestion workflow encountered failures. Check logs above for details."
+          fi
+          echo "See coverage summary above for current status"
