@@ -97,8 +97,24 @@ interface CoastalLocationDialogProps {
   onClose: () => void;
   title?: string;
   onSave: (loc: BasicLocation) => void;
+  /**
+   * Used as the inner map picker's default center. Existing callers pass the
+   * current effective location here so the map opens somewhere relevant. Does
+   * NOT drive any quick-pick button — for that, use `quickPickHome` /
+   * `quickPickCoastal`.
+   */
   homeLocation?: LocationLike;
   recentLocations?: BasicLocation[];
+  /**
+   * If provided, renders a "Use home" quick-pick button that one-shot saves
+   * this location via `onSave`. Pass the user's actual saved home (slot=home).
+   */
+  quickPickHome?: LocationLike;
+  /**
+   * If provided, renders a "Use fishing home" quick-pick button. Pass the
+   * user's actual saved coastal location (slot=coastal).
+   */
+  quickPickCoastal?: LocationLike;
   // optional extras for backwards compatibility with callers
   coastalLocation?: LocationLike;
   setHomeLocation?: (loc: LocationLike) => void;
@@ -111,6 +127,8 @@ const CoastalLocationDialog: React.FC<CoastalLocationDialogProps> = ({
   title = 'Pick your coastal location',
   onSave,
   homeLocation,
+  quickPickHome,
+  quickPickCoastal,
   recentLocations: _recentLocations = [],
 }) => {
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -638,13 +656,39 @@ const CoastalLocationDialog: React.FC<CoastalLocationDialogProps> = ({
           </div>
         )}
 
-        <div className="flex gap-2 mt-3">
+        <div className="flex flex-wrap gap-2 mt-3">
           <button className="btn btn-primary" onClick={getCurrentLocation} disabled={isLocating}>
             {isLocating ? 'Locating…' : 'Use current location'}
           </button>
           <button className="btn btn-outline" onClick={() => setShowMapPicker((s) => !s)}>
             {showMapPicker ? 'Hide map' : 'Pick from map'}
           </button>
+          {quickPickHome ? (
+            <button
+              className="btn btn-outline"
+              onClick={() => saveAndClose({
+                name: quickPickHome.name,
+                lat: quickPickHome.lat,
+                lon: quickPickHome.lon,
+              })}
+              aria-label={`Use saved home: ${quickPickHome.name}`}
+            >
+              Use home
+            </button>
+          ) : null}
+          {quickPickCoastal ? (
+            <button
+              className="btn btn-outline"
+              onClick={() => saveAndClose({
+                name: quickPickCoastal.name,
+                lat: quickPickCoastal.lat,
+                lon: quickPickCoastal.lon,
+              })}
+              aria-label={`Use saved fishing home: ${quickPickCoastal.name}`}
+            >
+              Use fishing home
+            </button>
+          ) : null}
         </div>
 
         {locationError ? (
