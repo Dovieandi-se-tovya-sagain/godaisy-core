@@ -316,6 +316,48 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
   const [lastError, setLastError] = useState<string | null>(null);
   const hasLoaded = useRef(false);
   const remoteLoadedRef = useRef(false);
+  // Slots updated locally within the last 30s. While a slot is in this set,
+  // refreshRemote / mount-load will not overwrite it with stale remote data —
+  // this prevents the optimistic-update-then-stomped-by-stale-GET oscillation
+  // when the POST to sync fails or hasn't completed yet.
+  const recentlyUpdatedSlots = useRef<Set<LocationSlot>>(new Set());
+
+  const markSlotRecentlyUpdated = useCallback((slot: LocationSlot) => {
+    recentlyUpdatedSlots.current.add(slot);
+    setTimeout(() => {
+      recentlyUpdatedSlots.current.delete(slot);
+    }, 30_000);
+  }, []);
+
+  // Merge remote locations into local state, preserving any slots that have been
+  // updated locally within the protection window. Active location id likewise
+  // sticks to the local choice if its slot is protected.
+  const applyRemoteState = useCallback((remote: StoredState) => {
+    const protectedSlots = recentlyUpdatedSlots.current;
+    setLocations(prev => {
+      const result = remote.locations.map(remoteLoc => {
+        if (protectedSlots.has(remoteLoc.slot)) {
+          return prev.find(l => l.slot === remoteLoc.slot) ?? remoteLoc;
+        }
+        return remoteLoc;
+      });
+      // Keep any locally-only slots that are still in the protection window
+      for (const localLoc of prev) {
+        if (protectedSlots.has(localLoc.slot) && !result.some(r => r.slot === localLoc.slot)) {
+          result.push(localLoc);
+        }
+      }
+      return result;
+    });
+    setActiveLocationId(prevActive => {
+      const remoteActiveSlot = remote.locations.find(l => l.id === remote.activeLocationId)?.slot;
+      // If the remote active slot is locally-protected, don't change activeLocationId.
+      if (remoteActiveSlot && protectedSlots.has(remoteActiveSlot)) {
+        return prevActive;
+      }
+      return remote.activeLocationId;
+    });
+  }, []);
 
   useEffect(() => {
     if (hasLoaded.current) return;
@@ -334,9 +376,9 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
       try {
         const remote = await loadRemoteLocations();
         if (remote && remote.locations.length > 0) {
-          // Remote has data - use it and sync to localStorage
-          setLocations(remote.locations);
-          setActiveLocationId(remote.activeLocationId);
+          // Remote has data - use it and sync to localStorage (preserving any
+          // locally-protected slots that have been updated within the window).
+          applyRemoteState(remote);
           persistState(remote);
         } else if (remote && !stored) {
           // Remote explicitly returned empty AND we have no local data
@@ -373,15 +415,16 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
     try {
       const remote = await loadRemoteLocations();
       if (remote) {
-        setLocations(remote.locations);
-        setActiveLocationId(remote.activeLocationId);
+        // Preserve any locally-protected slots so a stale remote read can't
+        // stomp a recent optimistic update whose POST hasn't synced (or failed).
+        applyRemoteState(remote);
         persistState(remote);
       }
     } finally {
       // Reset flag after a short delay to allow future refreshes
       setTimeout(() => { remoteLoadedRef.current = false; }, 2000);
     }
-  }, []);
+  }, [applyRemoteState]);
 
   const clearLocation = useCallback(async () => {
     setLocations([]);
@@ -454,11 +497,13 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
           slot: input.slot,
         });
 
-        // Optimistic local update
-        const existingIndex = locations.findIndex(loc => loc.slot === input.slot);
-        const tempId = existingIndex >= 0 ? locations[existingIndex].id : crypto.randomUUID();
+        // Compute the optimistic location once, off the latest closure read.
+        // The minor staleness in usageCount is acceptable; the actual state
+        // mutation below uses a functional setLocations so concurrent updates
+        // for different slots don't lose each other.
+        const existing = locations.find(loc => loc.slot === input.slot);
         const optimisticLocation: SavedLocation = {
-          id: tempId,
+          id: existing?.id ?? crypto.randomUUID(),
           slot: input.slot,
           name: finalName,
           lat: nextLat,
@@ -468,19 +513,32 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
           accuracy: input.accuracy ?? null,
           source: input.source ?? 'manual',
           updatedAt: new Date().toISOString(),
-          usageCount: existingIndex >= 0 ? locations[existingIndex].usageCount + 1 : 1,
+          usageCount: existing ? existing.usageCount + 1 : 1,
         };
 
-        const optimisticLocations = existingIndex >= 0
-          ? locations.map((loc, i) => i === existingIndex ? optimisticLocation : loc)
-          : [...locations, optimisticLocation];
+        // Track this slot as recently-updated so refreshRemote can't stomp it
+        // with stale data while the POST is in flight (or after it fails).
+        markSlotRecentlyUpdated(input.slot);
 
-        setLocations(optimisticLocations);
+        // Functional setLocations: merges with the latest state, never loses a
+        // concurrent update to a different slot.
+        setLocations(prev => {
+          const idx = prev.findIndex(loc => loc.slot === input.slot);
+          return idx >= 0
+            ? prev.map((loc, i) => (i === idx ? optimisticLocation : loc))
+            : [...prev, optimisticLocation];
+        });
         if (input.makeActive !== false) {
           setActiveLocationId(optimisticLocation.id);
         }
+        // persistState reads the closure `locations` — slightly stale by one
+        // setState but acceptable for an offline cache; the next refresh from
+        // any state change will re-persist accurately.
+        const optimisticPersist = existing
+          ? locations.map(loc => (loc.slot === input.slot ? optimisticLocation : loc))
+          : [...locations, optimisticLocation];
         persistState({
-          locations: optimisticLocations,
+          locations: optimisticPersist,
           activeLocationId: input.makeActive !== false ? optimisticLocation.id : activeLocationId,
         });
 
@@ -488,16 +546,20 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
           const remoteResult = await upsertRemoteLocationBySlot(updateInput);
           if (remoteResult.ok) {
             const remoteLocation = remoteResult.location;
-            const syncedLocations = existingIndex >= 0
-              ? locations.map((loc, i) => i === existingIndex ? remoteLocation : loc)
-              : [...locations.filter(loc => loc.slot !== input.slot), remoteLocation];
-
-            setLocations(syncedLocations);
+            setLocations(prev => {
+              const idx = prev.findIndex(loc => loc.slot === input.slot);
+              return idx >= 0
+                ? prev.map((loc, i) => (i === idx ? remoteLocation : loc))
+                : [...prev.filter(loc => loc.slot !== input.slot), remoteLocation];
+            });
             if (input.makeActive !== false) {
               setActiveLocationId(remoteLocation.id);
             }
+            const syncedPersist = optimisticPersist.some(l => l.slot === input.slot)
+              ? optimisticPersist.map(loc => (loc.slot === input.slot ? remoteLocation : loc))
+              : [...optimisticPersist.filter(loc => loc.slot !== input.slot), remoteLocation];
             persistState({
-              locations: syncedLocations,
+              locations: syncedPersist,
               activeLocationId: input.makeActive !== false ? remoteLocation.id : activeLocationId,
             });
             return remoteLocation;
@@ -514,7 +576,7 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
         setSyncing(false);
       }
     },
-    [locations, activeLocationId]
+    [locations, activeLocationId, markSlotRecentlyUpdated]
   );
 
   // Legacy updateLocation method for backward compatibility
