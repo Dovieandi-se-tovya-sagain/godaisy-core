@@ -331,9 +331,15 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
 
   // Merge remote locations into local state, preserving any slots that have been
   // updated locally within the protection window. Active location id likewise
-  // sticks to the local choice if its slot is protected.
+  // sticks to the local choice if its slot is protected. The merged result is
+  // also persisted to localStorage so that reloading mid-protection-window
+  // doesn't silently roll back to stale remote data.
   const applyRemoteState = useCallback((remote: StoredState) => {
     const protectedSlots = recentlyUpdatedSlots.current;
+    let mergedLocations: SavedLocation[] | null = null;
+    let mergedActiveId: string | null = null;
+    let mergedActiveSet = false;
+
     setLocations(prev => {
       const result = remote.locations.map(remoteLoc => {
         if (protectedSlots.has(remoteLoc.slot)) {
@@ -347,16 +353,25 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
           result.push(localLoc);
         }
       }
+      mergedLocations = result;
       return result;
     });
     setActiveLocationId(prevActive => {
       const remoteActiveSlot = remote.locations.find(l => l.id === remote.activeLocationId)?.slot;
       // If the remote active slot is locally-protected, don't change activeLocationId.
-      if (remoteActiveSlot && protectedSlots.has(remoteActiveSlot)) {
-        return prevActive;
-      }
-      return remote.activeLocationId;
+      const next = remoteActiveSlot && protectedSlots.has(remoteActiveSlot)
+        ? prevActive
+        : remote.activeLocationId;
+      mergedActiveId = next;
+      mergedActiveSet = true;
+      return next;
     });
+
+    // Persist the merged result (not the raw remote) so a reload during the
+    // protection window doesn't fall back to stale remote data.
+    if (mergedLocations !== null && mergedActiveSet) {
+      persistState({ locations: mergedLocations, activeLocationId: mergedActiveId });
+    }
   }, []);
 
   useEffect(() => {
@@ -376,10 +391,9 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
       try {
         const remote = await loadRemoteLocations();
         if (remote && remote.locations.length > 0) {
-          // Remote has data - use it and sync to localStorage (preserving any
-          // locally-protected slots that have been updated within the window).
+          // Remote has data — applyRemoteState merges with any protected slots
+          // and persists the merged result to localStorage.
           applyRemoteState(remote);
-          persistState(remote);
         } else if (remote && !stored) {
           // Remote explicitly returned empty AND we have no local data
           setLocations([]);
@@ -415,10 +429,9 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
     try {
       const remote = await loadRemoteLocations();
       if (remote) {
-        // Preserve any locally-protected slots so a stale remote read can't
-        // stomp a recent optimistic update whose POST hasn't synced (or failed).
+        // applyRemoteState preserves any locally-protected slots and persists
+        // the merged result to localStorage in one step.
         applyRemoteState(remote);
-        persistState(remote);
       }
     } finally {
       // Reset flag after a short delay to allow future refreshes
