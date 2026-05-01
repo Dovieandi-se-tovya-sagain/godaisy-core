@@ -576,7 +576,13 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
                 : prev;
             });
             if (input.makeActive !== false) {
-              setActiveLocationId(remoteLocation.id);
+              // Only swap the active id if it's still the optimistic id we set
+              // earlier. If a concurrent delete/clear or a different setActive
+              // changed it in the meantime, respect that newer intent — don't
+              // clobber it with a pointer to a location that may no longer exist.
+              setActiveLocationId(prevActive =>
+                prevActive === optimisticLocation.id ? remoteLocation.id : prevActive,
+              );
             }
             return remoteLocation;
           }
