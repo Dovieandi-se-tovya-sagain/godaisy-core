@@ -316,6 +316,76 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
   const [lastError, setLastError] = useState<string | null>(null);
   const hasLoaded = useRef(false);
   const remoteLoadedRef = useRef(false);
+  // Slots updated locally within the last 30s. While a slot is in this set,
+  // refreshRemote / mount-load will not overwrite it with stale remote data —
+  // this prevents the optimistic-update-then-stomped-by-stale-GET oscillation
+  // when the POST to sync fails or hasn't completed yet.
+  const recentlyUpdatedSlots = useRef<Set<LocationSlot>>(new Set());
+  const slotProtectionTimers = useRef<Map<LocationSlot, ReturnType<typeof setTimeout>>>(new Map());
+
+  const markSlotRecentlyUpdated = useCallback((slot: LocationSlot) => {
+    recentlyUpdatedSlots.current.add(slot);
+    // Reset the 30s window on every re-mark — a second update to the same
+    // slot extends protection, instead of inheriting the first call's timer.
+    const existing = slotProtectionTimers.current.get(slot);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      recentlyUpdatedSlots.current.delete(slot);
+      slotProtectionTimers.current.delete(slot);
+    }, 30_000);
+    slotProtectionTimers.current.set(slot, timer);
+  }, []);
+
+  // Merge remote locations into local state, preserving any slots that have been
+  // updated locally within the protection window. Active location id likewise
+  // sticks to the local choice if its slot is protected. localStorage stays in
+  // sync via the persistence useEffect below — never persist directly here.
+  const applyRemoteState = useCallback((remote: StoredState) => {
+    const protectedSlots = recentlyUpdatedSlots.current;
+
+    setLocations(prev => {
+      // Protected + present in prev: keep local. Protected + absent from prev:
+      // drop entirely (local truth is "this slot is deleted/cleared", so we
+      // don't want to re-add it from remote). Unprotected: take remote.
+      const result = remote.locations
+        .map(remoteLoc => {
+          if (protectedSlots.has(remoteLoc.slot)) {
+            const local = prev.find(l => l.slot === remoteLoc.slot);
+            return local ?? null;
+          }
+          return remoteLoc;
+        })
+        .filter((l): l is SavedLocation => l !== null);
+      // Add any locally-protected slots that exist in prev but not in remote
+      // (e.g. a new location picked locally before its POST has synced).
+      for (const localLoc of prev) {
+        if (protectedSlots.has(localLoc.slot) && !result.some(r => r.slot === localLoc.slot)) {
+          result.push(localLoc);
+        }
+      }
+      return result;
+    });
+    setActiveLocationId(prevActive => {
+      const remoteActiveSlot = remote.locations.find(l => l.id === remote.activeLocationId)?.slot;
+      // If the remote active slot is locally-protected, don't change activeLocationId.
+      return remoteActiveSlot && protectedSlots.has(remoteActiveSlot)
+        ? prevActive
+        : remote.activeLocationId;
+    });
+  }, []);
+
+  // Centralized persistence: keep localStorage in lockstep with React state.
+  // This replaces scattered persistState calls in handlers and avoids the
+  // dead-code race where setState updaters captured the merged value too late
+  // for synchronous post-dispatch reads.
+  useEffect(() => {
+    if (loading) return;
+    if (locations.length === 0 && activeLocationId === null) {
+      persistState(null);
+    } else {
+      persistState({ locations, activeLocationId });
+    }
+  }, [locations, activeLocationId, loading]);
 
   useEffect(() => {
     if (hasLoaded.current) return;
@@ -334,10 +404,9 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
       try {
         const remote = await loadRemoteLocations();
         if (remote && remote.locations.length > 0) {
-          // Remote has data - use it and sync to localStorage
-          setLocations(remote.locations);
-          setActiveLocationId(remote.activeLocationId);
-          persistState(remote);
+          // Remote has data — applyRemoteState merges with any protected slots
+          // and persists the merged result to localStorage.
+          applyRemoteState(remote);
         } else if (remote && !stored) {
           // Remote explicitly returned empty AND we have no local data
           setLocations([]);
@@ -373,27 +442,30 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
     try {
       const remote = await loadRemoteLocations();
       if (remote) {
-        setLocations(remote.locations);
-        setActiveLocationId(remote.activeLocationId);
-        persistState(remote);
+        // applyRemoteState preserves any locally-protected slots and persists
+        // the merged result to localStorage in one step.
+        applyRemoteState(remote);
       }
     } finally {
       // Reset flag after a short delay to allow future refreshes
       setTimeout(() => { remoteLoadedRef.current = false; }, 2000);
     }
-  }, []);
+  }, [applyRemoteState]);
 
   const clearLocation = useCallback(async () => {
+    // Mark every currently-known slot as recently-updated so a stale remote
+    // refresh can't bring locations back if the DELETE request fails.
+    // (Slight closure staleness is OK — the protection window is wide enough.)
+    for (const loc of locations) markSlotRecentlyUpdated(loc.slot);
     setLocations([]);
     setActiveLocationId(null);
-    persistState(null);
     setLastError(null);
     try {
       await authFetch('/api/user/location', { method: 'DELETE' });
     } catch (error) {
       console.warn('[UnifiedLocation] Remote clear failed', error);
     }
-  }, []);
+  }, [locations, markSlotRecentlyUpdated]);
 
   const updateLocationBySlot = useCallback(
     async (input: UpdateLocationBySlotInput): Promise<SavedLocation> => {
@@ -454,11 +526,13 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
           slot: input.slot,
         });
 
-        // Optimistic local update
-        const existingIndex = locations.findIndex(loc => loc.slot === input.slot);
-        const tempId = existingIndex >= 0 ? locations[existingIndex].id : crypto.randomUUID();
+        // Compute the optimistic location once, off the latest closure read.
+        // The minor staleness in usageCount is acceptable; the actual state
+        // mutation below uses a functional setLocations so concurrent updates
+        // for different slots don't lose each other.
+        const existing = locations.find(loc => loc.slot === input.slot);
         const optimisticLocation: SavedLocation = {
-          id: tempId,
+          id: existing?.id ?? crypto.randomUUID(),
           slot: input.slot,
           name: finalName,
           lat: nextLat,
@@ -468,38 +542,48 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
           accuracy: input.accuracy ?? null,
           source: input.source ?? 'manual',
           updatedAt: new Date().toISOString(),
-          usageCount: existingIndex >= 0 ? locations[existingIndex].usageCount + 1 : 1,
+          usageCount: existing ? existing.usageCount + 1 : 1,
         };
 
-        const optimisticLocations = existingIndex >= 0
-          ? locations.map((loc, i) => i === existingIndex ? optimisticLocation : loc)
-          : [...locations, optimisticLocation];
+        // Track this slot as recently-updated so refreshRemote can't stomp it
+        // with stale data while the POST is in flight (or after it fails).
+        markSlotRecentlyUpdated(input.slot);
 
-        setLocations(optimisticLocations);
+        // Functional setLocations: merges with the latest state, never loses a
+        // concurrent update to a different slot. Persistence is handled by the
+        // centralized useEffect that watches locations + activeLocationId.
+        setLocations(prev => {
+          const idx = prev.findIndex(loc => loc.slot === input.slot);
+          return idx >= 0
+            ? prev.map((loc, i) => (i === idx ? optimisticLocation : loc))
+            : [...prev, optimisticLocation];
+        });
         if (input.makeActive !== false) {
           setActiveLocationId(optimisticLocation.id);
         }
-        persistState({
-          locations: optimisticLocations,
-          activeLocationId: input.makeActive !== false ? optimisticLocation.id : activeLocationId,
-        });
 
         try {
           const remoteResult = await upsertRemoteLocationBySlot(updateInput);
           if (remoteResult.ok) {
             const remoteLocation = remoteResult.location;
-            const syncedLocations = existingIndex >= 0
-              ? locations.map((loc, i) => i === existingIndex ? remoteLocation : loc)
-              : [...locations.filter(loc => loc.slot !== input.slot), remoteLocation];
-
-            setLocations(syncedLocations);
-            if (input.makeActive !== false) {
-              setActiveLocationId(remoteLocation.id);
-            }
-            persistState({
-              locations: syncedLocations,
-              activeLocationId: input.makeActive !== false ? remoteLocation.id : activeLocationId,
+            setLocations(prev => {
+              const idx = prev.findIndex(loc => loc.slot === input.slot);
+              // If the slot is no longer in prev (a concurrent delete or clear
+              // removed it while our POST was in flight), DO NOT re-add. The
+              // user's most recent intent was to remove it.
+              return idx >= 0
+                ? prev.map((loc, i) => (i === idx ? remoteLocation : loc))
+                : prev;
             });
+            if (input.makeActive !== false) {
+              // Only swap the active id if it's still the optimistic id we set
+              // earlier. If a concurrent delete/clear or a different setActive
+              // changed it in the meantime, respect that newer intent — don't
+              // clobber it with a pointer to a location that may no longer exist.
+              setActiveLocationId(prevActive =>
+                prevActive === optimisticLocation.id ? remoteLocation.id : prevActive,
+              );
+            }
             return remoteLocation;
           }
 
@@ -514,7 +598,7 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
         setSyncing(false);
       }
     },
-    [locations, activeLocationId]
+    [locations, activeLocationId, markSlotRecentlyUpdated]
   );
 
   // Legacy updateLocation method for backward compatibility
@@ -561,8 +645,13 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
       setLastError(null);
 
       try {
+        // Protect the slot of the new active location so a stale refreshRemote
+        // can't reset activeLocationId to the previous server-side choice
+        // while our setRemoteActiveLocation is in flight (or after it fails).
+        const target = locations.find(loc => loc.id === locationId);
+        if (target) markSlotRecentlyUpdated(target.slot);
+
         setActiveLocationId(locationId);
-        persistState({ locations, activeLocationId: locationId });
 
         await setRemoteActiveLocation(locationId);
       } catch (error) {
@@ -572,7 +661,7 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
         setSyncing(false);
       }
     },
-    [locations]
+    [locations, markSlotRecentlyUpdated]
   );
 
   const deleteLocationHandler = useCallback(
@@ -581,14 +670,23 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
       setLastError(null);
 
       try {
+        // Protect the deleted slot so refreshRemote can't bring it back if the
+        // DELETE request fails. Also protect the new active slot so the active
+        // pointer doesn't get reset.
+        const deleted = locations.find(loc => loc.id === locationId);
+        if (deleted) markSlotRecentlyUpdated(deleted.slot);
+
         const newLocations = locations.filter(loc => loc.id !== locationId);
         const newActiveId = activeLocationId === locationId
           ? (newLocations[0]?.id ?? null)
           : activeLocationId;
+        const newActiveSlot = newLocations.find(loc => loc.id === newActiveId)?.slot;
+        if (newActiveSlot) markSlotRecentlyUpdated(newActiveSlot);
 
-        setLocations(newLocations);
+        // Functional setLocations: doesn't lose any concurrent update to a
+        // different location.
+        setLocations(prev => prev.filter(loc => loc.id !== locationId));
         setActiveLocationId(newActiveId);
-        persistState(newLocations.length > 0 ? { locations: newLocations, activeLocationId: newActiveId } : null);
 
         await deleteRemoteLocation(locationId);
       } catch (error) {
@@ -598,7 +696,7 @@ export function UnifiedLocationProvider({ children }: { children: React.ReactNod
         setSyncing(false);
       }
     },
-    [locations, activeLocationId]
+    [locations, activeLocationId, markSlotRecentlyUpdated]
   );
 
   const getLocationBySlot = useCallback(
