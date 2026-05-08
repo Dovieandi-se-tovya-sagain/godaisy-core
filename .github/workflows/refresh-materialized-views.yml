@@ -17,10 +17,17 @@ jobs:
     steps:
       - name: Refresh findr_conditions_latest
         run: |
-          curl -sf -X POST \
+          response=$(curl -s -w "\n%{http_code}" -X POST \
             "${{ secrets.SUPABASE_URL }}/rest/v1/rpc/refresh_findr_conditions_latest" \
             -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             -H "Content-Type: application/json" \
-            -d '{}'
-          echo "✅ findr_conditions_latest refreshed"
+            -d '{}')
+          body=$(echo "$response" | head -n -1)
+          http_code=$(echo "$response" | tail -n 1)
+          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+            echo "✅ findr_conditions_latest refreshed (HTTP $http_code)"
+          else
+            echo "⚠️  Refresh returned HTTP $http_code: $body"
+            echo "Non-fatal: MV will be refreshed on next ingestion run."
+          fi
