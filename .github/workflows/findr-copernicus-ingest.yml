@@ -152,19 +152,23 @@ jobs:
           npx tsx scripts/ingestion/verify-database-status.ts
 
       - name: Create GitHub Issue on failure
-        if: ${{ needs.ingest.result == 'failure' }}
+        if: ${{ needs.ingest.result == 'failure' || needs.ingest.result == 'cancelled' }}
         uses: actions/github-script@v7
         with:
           script: |
-            const title = '🚨 Copernicus Data Ingestion Failed';
-            const body = `## Copernicus Data Ingestion Failure
+            const result = '${{ needs.ingest.result }}';
+            const title = result === 'cancelled'
+              ? '🚨 Copernicus Data Ingestion Timed Out (cancelled)'
+              : '🚨 Copernicus Data Ingestion Failed';
+            const body = `## Copernicus Data Ingestion ${result === 'cancelled' ? 'Timeout' : 'Failure'}
 
-            The scheduled Copernicus data ingestion workflow failed.
+            The scheduled Copernicus data ingestion workflow ${result === 'cancelled' ? 'was cancelled after exceeding the 6h job timeout' : 'failed'}.
 
             **Workflow Run**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
             **Time**: ${new Date().toISOString()}
 
             ### Possible Causes:
+            ${result === 'cancelled' ? '- CMEMS BGC worker unavailable for one or more regions (should now be mitigated by the BGC circuit breaker in realClient.ts — if this still times out, the circuit breaker threshold or physics fetch itself may need investigation)' : ''}
             - Copernicus API credentials expired
             - Network issues
             - API rate limiting
