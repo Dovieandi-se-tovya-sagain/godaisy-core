@@ -158,17 +158,21 @@ jobs:
           script: |
             const result = '${{ needs.ingest.result }}';
             const title = result === 'cancelled'
-              ? '🚨 Copernicus Data Ingestion Timed Out (cancelled)'
+              ? '🚨 Copernicus Data Ingestion Cancelled'
               : '🚨 Copernicus Data Ingestion Failed';
-            const body = `## Copernicus Data Ingestion ${result === 'cancelled' ? 'Timeout' : 'Failure'}
+            const body = `## Copernicus Data Ingestion ${result === 'cancelled' ? 'Cancelled' : 'Failure'}
 
-            The scheduled Copernicus data ingestion workflow ${result === 'cancelled' ? 'was cancelled after exceeding the 6h job timeout' : 'failed'}.
+            The scheduled Copernicus data ingestion workflow was ${result === 'cancelled' ? 'cancelled' : 'failed'}.
 
             **Workflow Run**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
             **Time**: ${new Date().toISOString()}
 
             ### Possible Causes:
-            ${result === 'cancelled' ? '- CMEMS BGC worker unavailable for one or more regions (should now be mitigated by the BGC circuit breaker in realClient.ts — if this still times out, the circuit breaker threshold or physics fetch itself may need investigation)' : ''}
+            ${result === 'cancelled' ? [
+              '- Exceeded the 6h job timeout (should now be mitigated by the BGC circuit breaker in realClient.ts — if this recurs, the circuit breaker threshold or physics fetch itself may need investigation)',
+              '- Superseded by a newer run of the same workflow (this workflow uses \\`concurrency.cancel-in-progress: true\\`, so a later scheduled or manually-triggered run cancels any run still in progress — check whether another run started around the same time before assuming a timeout)',
+              '- Manually cancelled by a user',
+            ].join('\n            ') : ''}
             - Copernicus API credentials expired
             - Network issues
             - API rate limiting

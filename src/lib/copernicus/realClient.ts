@@ -251,12 +251,21 @@ export class RealCopernicusProvider implements CopernicusProvider {
   // of pure timeout-waiting per cell, multiplied across hundreds of cells,
   // which is what caused multi-hour ingestion job hangs (see godaisy-core
   // incident: BAL/MED/GLO_AM/GLO_AP regions cancelled after hitting the
-  // 6h GitHub Actions job timeout). Once BGC fails this many cells in a
-  // row within a single provider instance (i.e. within one region's run),
-  // stop attempting BGC entirely for the rest of that run — physics data
-  // (temperature/salinity/currents) is unaffected and keeps flowing.
-  private static readonly BGC_CIRCUIT_BREAKER_THRESHOLD = 3;
-  private bgcConsecutiveFailures = 0;
+  // 6h GitHub Actions job timeout).
+  //
+  // The ingestion script processes cells in parallel batches (Promise.all,
+  // BATCH_SIZE cells at a time, all sharing this cached provider instance —
+  // see providerCache in ingest-copernicus-data.ts), so a strict
+  // "consecutive failures" counter isn't safe: completion order across a
+  // batch is nondeterministic, and a handful of unlucky early completions
+  // could trip the breaker even while other in-flight cells in the same
+  // batch go on to succeed. Instead this tracks a sliding window of the
+  // most recent outcomes and opens the circuit only once a clear majority
+  // within that window failed — tolerant of a few flukes, still responsive
+  // once a region's BGC worker is genuinely down.
+  private static readonly BGC_WINDOW_SIZE = 6;
+  private static readonly BGC_FAILURE_THRESHOLD = 5; // 5 of last 6 → open
+  private bgcRecentOutcomes: boolean[] = []; // true = had data, false = failed
   private bgcCircuitOpen = false;
 
   constructor(region?: string) {
@@ -496,7 +505,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
 
       // Try biogeochemical with date fallback (BGC is stable over days)
       if (this.bgcCircuitOpen) {
-        console.log(`   🔌 BGC circuit open (${this.bgcConsecutiveFailures} consecutive failures) — skipping bio fetch for this cell`);
+        console.log(`   🔌 BGC circuit open — skipping bio fetch for this cell`);
       }
       for (const dayOffset of stableDateFallbacks) {
         if (bioData || this.bgcCircuitOpen) break;
@@ -540,19 +549,25 @@ export class RealCopernicusProvider implements CopernicusProvider {
         }
       }
 
-      // Track BGC availability across cells for this region's run. If BGC
-      // (the primary bio dataset) fails repeatedly in a row, the CMEMS BGC
-      // worker is almost certainly down for this region — stop burning
+      // Track BGC availability across cells for this region's run. Cells are
+      // processed in parallel batches (see class-level comment above), so
+      // this records each cell's own outcome into a sliding window rather
+      // than assuming strict ordering — robust to concurrent completions.
+      // If a clear majority of recent attempts had no BGC data, the CMEMS
+      // BGC worker is almost certainly down for this region — stop burning
       // time retrying it and open the circuit for the rest of the run.
       if (!this.bgcCircuitOpen) {
-        if (bioData) {
-          this.bgcConsecutiveFailures = 0;
-        } else {
-          this.bgcConsecutiveFailures++;
-          if (this.bgcConsecutiveFailures >= RealCopernicusProvider.BGC_CIRCUIT_BREAKER_THRESHOLD) {
-            this.bgcCircuitOpen = true;
-            console.warn(`   🔌 BGC circuit breaker tripped: ${this.bgcConsecutiveFailures} consecutive cells with no BGC data — skipping BGC (bio/nutrients/carbonate/PFT/plankton) for the rest of this run. Physics data is unaffected.`);
-          }
+        this.bgcRecentOutcomes.push(!!bioData);
+        if (this.bgcRecentOutcomes.length > RealCopernicusProvider.BGC_WINDOW_SIZE) {
+          this.bgcRecentOutcomes.shift();
+        }
+        const failuresInWindow = this.bgcRecentOutcomes.filter(had => !had).length;
+        if (
+          this.bgcRecentOutcomes.length >= RealCopernicusProvider.BGC_WINDOW_SIZE &&
+          failuresInWindow >= RealCopernicusProvider.BGC_FAILURE_THRESHOLD
+        ) {
+          this.bgcCircuitOpen = true;
+          console.warn(`   🔌 BGC circuit breaker tripped: ${failuresInWindow}/${this.bgcRecentOutcomes.length} of the last cells had no BGC data — skipping BGC (bio/nutrients/carbonate/PFT/plankton) for the rest of this run. Physics data is unaffected.`);
         }
       }
 
