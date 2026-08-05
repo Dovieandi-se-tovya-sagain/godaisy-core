@@ -1,0 +1,111 @@
+name: Copernicus Data Freshness Check
+
+permissions:
+  contents: read
+  issues: write
+
+on:
+  schedule:
+    - cron: '30 16 * * *'  # Daily at 16:30 UTC — after the 15:00 UTC ingestion run has had time to finish
+  workflow_dispatch:
+
+concurrency:
+  group: check-copernicus-freshness
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    if: ${{ github.repository == 'Dovieandi-se-tovya-sagain/godaisy-core' }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Node dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Check Copernicus data freshness
+        id: check
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/ingestion/check-copernicus-freshness.ts
+
+      - name: Create GitHub Issue on failure
+        if: ${{ failure() && steps.check.outcome == 'failure' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = '🚨 Copernicus data freshness check failed';
+            const body = `## Copernicus Data Freshness Check Failed
+
+            The scheduled freshness check found that \`grid_conditions_latest\` is stale or missing biogeochemical (salinity/chlorophyll/oxygen/nitrate/phosphate) coverage — independent of whether the ingestion workflow itself reported success.
+
+            This check exists because the ingestion workflow's own alerting only fires on \`failure\`/\`cancelled\`. It missed the Aug 2026 outage where the per-region BGC circuit breaker in \`realClient.ts\` silently skipped BGC fetches for days while the job kept reporting \`success\`.
+
+            **Workflow Run**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            **Time**: ${new Date().toISOString()}
+
+            ### Actions Required:
+            1. Check the run log above for the exact coverage numbers that failed.
+            2. If BGC coverage is low but physics coverage is healthy: CMEMS's BGC worker is likely down again, or the circuit breaker is tripping too early — check \`src/lib/copernicus/realClient.ts\`.
+            3. If physics coverage is also low: broader outage — check Copernicus credentials, CMEMS status, and the ingestion workflow run history.
+            4. If fresh-cell count is low: the ingestion workflow may not be running at all — check \`findr-copernicus-ingest.yml\` run history.`;
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'copernicus-freshness-alert'
+            });
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['bug', 'copernicus-freshness-alert', 'automated']
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issues.data[0].number,
+                body: `Freshness check failed again at ${new Date().toISOString()}\n\nWorkflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+              });
+            }
+
+      - name: Close resolved freshness alerts
+        if: ${{ steps.check.outcome == 'success' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'copernicus-freshness-alert'
+            });
+            for (const issue of issues.data) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: '✅ Copernicus data freshness is back to normal. Closing this issue.'
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed'
+              });
+            }
