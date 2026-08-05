@@ -143,8 +143,13 @@ export function parseGridCellCenter(cellId: string): { lat: number; lon: number 
 }
 
 export function findNearestGridCellId(lat: number, lon: number): string {
-  // Validate coordinates
-  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+  // Validate coordinates. NaN must be checked explicitly — every comparison
+  // against NaN (<, >, <=, >=) evaluates to false, so `NaN < -90` etc. below
+  // would silently let bad geolocation data (a common real-world shape:
+  // parseFloat() on empty/garbled input) sail through and produce a
+  // garbage-but-valid-looking cell id like "G025_SNaNWNaN" instead of
+  // erroring here where the caller can actually handle it.
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
     throw new Error(`Invalid coordinates: lat=${lat}, lon=${lon}`);
   }
 
