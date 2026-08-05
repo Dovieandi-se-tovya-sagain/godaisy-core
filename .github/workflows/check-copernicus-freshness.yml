@@ -49,16 +49,18 @@ jobs:
             const title = '🚨 Copernicus data freshness check failed';
             const body = `## Copernicus Data Freshness Check Failed
 
-            The scheduled freshness check found that \`grid_conditions_latest\` is stale or missing biogeochemical (salinity/chlorophyll/oxygen/nitrate/phosphate) coverage — independent of whether the ingestion workflow itself reported success.
+            The scheduled freshness check found that \`grid_conditions_latest\` is stale, or its BGC coverage (measured via \`chlorophyll_mg_m3\`, which is genuinely BGC-sourced — unlike \`salinity_psu\`, which comes from the physics dataset) has dropped below threshold — independent of whether the ingestion workflow itself reported success.
 
             This check exists because the ingestion workflow's own alerting only fires on \`failure\`/\`cancelled\`. It missed the Aug 2026 outage where the per-region BGC circuit breaker in \`realClient.ts\` silently skipped BGC fetches for days while the job kept reporting \`success\`.
+
+            Note: this check can only reliably catch a NEW or WIDESPREAD BGC outage (aggregate chlorophyll coverage across many cells drops together). It can miss a slow, already-in-progress BGC die-off for individual cells, because \`buildNonNullUpdate()\` in \`ingest-copernicus-data.ts\` always bumps \`collected_at\` on every attempt but only overwrites a numeric column when the new value is non-null — so a cell's last real chlorophyll reading can ride along as "fresh" long after its BGC fetches started failing.
 
             **Workflow Run**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
             **Time**: ${new Date().toISOString()}
 
             ### Actions Required:
             1. Check the run log above for the exact coverage numbers that failed.
-            2. If BGC coverage is low but physics coverage is healthy: CMEMS's BGC worker is likely down again, or the circuit breaker is tripping too early — check \`src/lib/copernicus/realClient.ts\`.
+            2. If BGC (chlorophyll) coverage is low but physics coverage is healthy: CMEMS's BGC worker is likely down again, or the circuit breaker is tripping too early — check \`src/lib/copernicus/realClient.ts\`.
             3. If physics coverage is also low: broader outage — check Copernicus credentials, CMEMS status, and the ingestion workflow run history.
             4. If fresh-cell count is low: the ingestion workflow may not be running at all — check \`findr-copernicus-ingest.yml\` run history.`;
             const issues = await github.rest.issues.listForRepo({
