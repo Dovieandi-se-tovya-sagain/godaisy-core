@@ -147,9 +147,13 @@ jobs:
       # This is the step that actually gates the job. `continue-on-error` on
       # the region steps above means their individual failures never fail the
       # job by themselves — this step reads each step's real outcome and
-      # fails (exit 1) if any attempted region failed, so a real script
-      # failure (e.g. call-ingest-function.ts's exit(1) on zero successes)
-      # can't hide behind a green checkmark anymore.
+      # fails (exit 1) only when EVERY attempted region failed (a real
+      # outage), while a partial failure (some regions ok, some not) just
+      # warns without failing the job, so one bad region doesn't page anyone
+      # for what's likely a transient/regional issue. Either way, a real
+      # script failure (e.g. call-ingest-function.ts's exit(1) on zero
+      # successes) can no longer hide behind a green checkmark the way it
+      # did before this step existed.
       - name: Check attempted regions
         id: gate
         if: always()
