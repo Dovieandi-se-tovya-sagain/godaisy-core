@@ -1,5 +1,9 @@
 name: FINDR MET Norway ingestion (4x daily)
 
+permissions:
+  contents: read
+  issues: write
+
 on:
   schedule:
     - cron: '0 */6 * * *'
@@ -31,6 +35,7 @@ jobs:
         run: npm ci --legacy-peer-deps
 
       - name: Run MET-only ingestion
+        id: ingest
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -38,3 +43,73 @@ jobs:
           FINDR_MET_SIMPLE_PROBES: '1'
           FINDR_CONDITIONS_DELAY_MS: '250'
         run: npx tsx scripts/ingestion/ingestFindrConditions.ts
+
+      # Unlike findr-copernicus-ingest.yml, this workflow has no separate
+      # coverage-check step — ingestFindrConditions.ts's own exit code
+      # (0 successes -> exit 1, see its main()) is the only failure signal,
+      # so this step's outcome is what's checked below.
+      - name: Create GitHub Issue on failure
+        if: ${{ failure() && steps.ingest.outcome == 'failure' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = '🚨 FINDR MET Norway ingestion failed';
+            const body = `## FINDR MET Norway Ingestion Failed
+
+            The scheduled MET-only conditions ingestion run failed — ingestFindrConditions.ts exited non-zero, meaning it stored zero snapshots (or hit an unexpected error) for this run.
+
+            **Workflow Run**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            **Time**: ${new Date().toISOString()}
+
+            ### Actions Required:
+            1. Check the run log above for the MET void reasons / error.
+            2. If MET.no itself is down or rate-limiting, this should self-heal on the next scheduled run (every 6h).
+            3. If this recurs across multiple runs, check whether the same rectangles keep failing (possible dead-cell / coordinate issue) vs. a broad MET.no outage.`;
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'findr-met-ingest-failure'
+            });
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['bug', 'findr-met-ingest-failure', 'automated']
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issues.data[0].number,
+                body: `Another failure occurred at ${new Date().toISOString()}\n\nWorkflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+              });
+            }
+
+      - name: Close resolved failure alerts
+        if: ${{ steps.ingest.outcome == 'success' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'findr-met-ingest-failure'
+            });
+            for (const issue of issues.data) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: '✅ FINDR MET Norway ingestion is succeeding again. Closing this issue.'
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed'
+              });
+            }

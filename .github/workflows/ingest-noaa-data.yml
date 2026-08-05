@@ -1,5 +1,9 @@
 name: Ingest NOAA OISST Data
 
+permissions:
+  contents: read
+  issues: write
+
 on:
   schedule:
     # Run every 3 hours at :15 past the hour (reduced from hourly to avoid NOAA rate limiting)
@@ -53,7 +57,14 @@ jobs:
           echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env.local
           echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" >> .env.local
 
+      # Each region step keeps continue-on-error so one bad region doesn't block
+      # the rest from running — but every step now has an `id`, and the "Check
+      # attempted regions" step below reads their outcomes explicitly and fails
+      # the job if any attempted region failed. Previously continue-on-error
+      # swallowed call-ingest-function.ts's exit(1) on zero successes entirely;
+      # job.status stayed "success" no matter how many regions failed.
       - name: Ingest California (100 grids)
+        id: california
         if: github.event.inputs.region == 'all' || github.event.inputs.region == 'california' || github.event_name == 'schedule'
         continue-on-error: true
         run: |
@@ -61,6 +72,7 @@ jobs:
           npx tsx scripts/ingestion/call-ingest-function.ts --california --limit=100
 
       - name: Ingest Florida (100 grids)
+        id: florida
         if: github.event.inputs.region == 'all' || github.event.inputs.region == 'florida' || github.event_name == 'schedule'
         continue-on-error: true
         run: |
@@ -68,6 +80,7 @@ jobs:
           npx tsx scripts/ingestion/call-ingest-function.ts --florida --limit=100
 
       - name: Ingest New York (100 grids)
+        id: newyork
         if: github.event.inputs.region == 'all' || github.event.inputs.region == 'newyork' || github.event_name == 'schedule'
         continue-on-error: true
         run: |
@@ -75,6 +88,7 @@ jobs:
           npx tsx scripts/ingestion/call-ingest-function.ts --newyork --limit=100
 
       - name: Ingest Gulf of Mexico (100 grids)
+        id: gulf
         if: github.event.inputs.region == 'all' || github.event.inputs.region == 'gulf' || github.event_name == 'schedule'
         continue-on-error: true
         run: |
@@ -82,6 +96,7 @@ jobs:
           npx tsx scripts/ingestion/call-ingest-function.ts --gulf --limit=100
 
       - name: Ingest Pacific Northwest (100 grids)
+        id: pacific_nw
         if: github.event.inputs.region == 'all' || github.event.inputs.region == 'pacific-nw'
         continue-on-error: true
         run: |
@@ -89,6 +104,7 @@ jobs:
           npx tsx scripts/ingestion/call-ingest-function.ts --pacific-nw --limit=100
 
       - name: Ingest Hawaii (100 grids)
+        id: hawaii
         if: github.event.inputs.region == 'all' || github.event.inputs.region == 'hawaii'
         continue-on-error: true
         run: |
@@ -96,6 +112,7 @@ jobs:
           npx tsx scripts/ingestion/call-ingest-function.ts --hawaii --limit=100
 
       - name: Ingest Alaska (150 grids)
+        id: alaska
         if: github.event.inputs.region == 'all' || github.event.inputs.region == 'alaska'
         continue-on-error: true
         run: |
@@ -103,6 +120,7 @@ jobs:
           npx tsx scripts/ingestion/call-ingest-function.ts --alaska --limit=150
 
       - name: Ingest Canada West Coast (100 grids)
+        id: canada_west
         if: github.event.inputs.region == 'all' || github.event.inputs.region == 'canada-west'
         continue-on-error: true
         run: |
@@ -110,6 +128,7 @@ jobs:
           npx tsx scripts/ingestion/call-ingest-function.ts --canada-west --limit=100
 
       - name: Ingest Canada East Coast (100 grids)
+        id: canada_east
         if: github.event.inputs.region == 'all' || github.event.inputs.region == 'canada-east'
         continue-on-error: true
         run: |
@@ -125,6 +144,51 @@ jobs:
           echo "📊 Checking current data coverage..."
           npx tsx -e "(async () => { const { createClient } = await import('@supabase/supabase-js'); const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY); const { count: totalCount } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }); const { count: noaaCountOld } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).contains('sources', ['ncdcOisst21Agg_LonPM180.sst']); const { count: noaaCountNew } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).contains('sources', ['noaacwBLENDEDsstDaily.analysed_sst']); const noaaCount = noaaCountOld + noaaCountNew; const { count: mockCount } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).contains('sources', ['MOCK_DATA_FOR_TESTING']); console.log('📊 Data Coverage Summary:'); console.log('  Total grids with data: ' + totalCount + ' / 65,884 (' + (totalCount/65884*100).toFixed(2) + '%'); console.log('  Real NOAA grids (old dataset): ' + noaaCountOld); console.log('  Real NOAA grids (new dataset): ' + noaaCountNew); console.log('  Real NOAA grids (total): ' + noaaCount); console.log('  Mock data grids: ' + mockCount); console.log('  Real data coverage: ' + ((noaaCount/(noaaCount+mockCount))*100).toFixed(1) + '%'); })()"
 
+      # This is the step that actually gates the job. `continue-on-error` on
+      # the region steps above means their individual failures never fail the
+      # job by themselves — this step reads each step's real outcome and
+      # fails (exit 1) if any attempted region failed, so a real script
+      # failure (e.g. call-ingest-function.ts's exit(1) on zero successes)
+      # can't hide behind a green checkmark anymore.
+      - name: Check attempted regions
+        id: gate
+        if: always()
+        run: |
+          declare -A outcomes=(
+            [California]="${{ steps.california.outcome }}"
+            [Florida]="${{ steps.florida.outcome }}"
+            [NewYork]="${{ steps.newyork.outcome }}"
+            [Gulf]="${{ steps.gulf.outcome }}"
+            [PacificNW]="${{ steps.pacific_nw.outcome }}"
+            [Hawaii]="${{ steps.hawaii.outcome }}"
+            [Alaska]="${{ steps.alaska.outcome }}"
+            [CanadaWest]="${{ steps.canada_west.outcome }}"
+            [CanadaEast]="${{ steps.canada_east.outcome }}"
+          )
+          attempted=0
+          failed=0
+          failed_names=""
+          for name in "${!outcomes[@]}"; do
+            outcome="${outcomes[$name]}"
+            if [ "$outcome" = "skipped" ] || [ -z "$outcome" ]; then
+              continue
+            fi
+            attempted=$((attempted + 1))
+            if [ "$outcome" != "success" ]; then
+              failed=$((failed + 1))
+              failed_names="$failed_names $name"
+            fi
+          done
+          echo "Attempted regions: $attempted, failed: $failed ($failed_names )"
+          if [ "$attempted" -gt 0 ] && [ "$failed" -eq "$attempted" ]; then
+            echo "❌ Every attempted region failed. Treating as a full outage."
+            exit 1
+          elif [ "$failed" -gt 0 ]; then
+            echo "⚠️  Some regions failed ($failed_names ), but at least one succeeded. Not failing the job, but this is worth investigating."
+          else
+            echo "✅ All attempted regions succeeded."
+          fi
+
       - name: Report status
         if: always()
         run: |
@@ -135,3 +199,70 @@ jobs:
             echo "❌ NOAA data ingestion workflow encountered failures. Check logs above for details."
           fi
           echo "See coverage summary above for current status"
+
+      - name: Create GitHub Issue on failure
+        if: ${{ failure() && steps.gate.outcome == 'failure' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = '🚨 NOAA OISST ingestion: every attempted region failed';
+            const body = `## NOAA OISST Ingestion Failure
+
+            Every region attempted in this run of the NOAA OISST ingestion workflow failed (each region's own script correctly exits non-zero on zero successes — this issue means that failure was NOT swallowed by \`continue-on-error\`, so this is a real outage, not a single-region blip).
+
+            **Workflow Run**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            **Time**: ${new Date().toISOString()}
+
+            ### Actions Required:
+            1. Check the run log above for the per-region error output.
+            2. Check NOAA OISST API status / rate limiting.
+            3. Verify Supabase credentials in GitHub Secrets.
+            4. Check \`grid_conditions_latest\` coverage summary (printed earlier in this run) for how stale sea-surface-temperature data has become.`;
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'noaa-ingestion-failure'
+            });
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['bug', 'noaa-ingestion-failure', 'automated']
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issues.data[0].number,
+                body: `Another full-outage failure occurred at ${new Date().toISOString()}\n\nWorkflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+              });
+            }
+
+      - name: Close resolved failure alerts
+        if: ${{ steps.gate.outcome == 'success' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'noaa-ingestion-failure'
+            });
+            for (const issue of issues.data) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: '✅ NOAA OISST ingestion is succeeding again. Closing this issue.'
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed'
+              });
+            }
