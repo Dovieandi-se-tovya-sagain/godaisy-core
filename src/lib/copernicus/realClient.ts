@@ -244,6 +244,30 @@ export class RealCopernicusProvider implements CopernicusProvider {
   private region?: string;
   private datasetConfig?: CopernicusDatasetConfig;
 
+  // Circuit breaker for the BGC dataset family (bio, nutrients, carbonate,
+  // PFT, plankton). When CMEMS's BGC worker is unavailable for a region,
+  // every cell was independently retrying all 5 BGC datasets (2 date
+  // fallbacks each, 90-120s worker timeout per attempt) — up to ~17 minutes
+  // of pure timeout-waiting per cell, multiplied across hundreds of cells,
+  // which is what caused multi-hour ingestion job hangs (see godaisy-core
+  // incident: BAL/MED/GLO_AM/GLO_AP regions cancelled after hitting the
+  // 6h GitHub Actions job timeout).
+  //
+  // The ingestion script processes cells in parallel batches (Promise.all,
+  // BATCH_SIZE cells at a time, all sharing this cached provider instance —
+  // see providerCache in ingest-copernicus-data.ts), so a strict
+  // "consecutive failures" counter isn't safe: completion order across a
+  // batch is nondeterministic, and a handful of unlucky early completions
+  // could trip the breaker even while other in-flight cells in the same
+  // batch go on to succeed. Instead this tracks a sliding window of the
+  // most recent outcomes and opens the circuit only once a clear majority
+  // within that window failed — tolerant of a few flukes, still responsive
+  // once a region's BGC worker is genuinely down.
+  private static readonly BGC_WINDOW_SIZE = 6;
+  private static readonly BGC_FAILURE_THRESHOLD = 5; // 5 of last 6 → open
+  private bgcRecentOutcomes: boolean[] = []; // true = had data, false = failed
+  private bgcCircuitOpen = false;
+
   constructor(region?: string) {
     this.region = region;
 
@@ -480,8 +504,11 @@ export class RealCopernicusProvider implements CopernicusProvider {
       }
 
       // Try biogeochemical with date fallback (BGC is stable over days)
+      if (this.bgcCircuitOpen) {
+        console.log(`   🔌 BGC circuit open — skipping bio fetch for this cell`);
+      }
       for (const dayOffset of stableDateFallbacks) {
-        if (bioData) break;
+        if (bioData || this.bgcCircuitOpen) break;
 
         const bgcDate = new Date(start);
         bgcDate.setDate(bgcDate.getDate() - dayOffset);
@@ -522,9 +549,31 @@ export class RealCopernicusProvider implements CopernicusProvider {
         }
       }
 
+      // Track BGC availability across cells for this region's run. Cells are
+      // processed in parallel batches (see class-level comment above), so
+      // this records each cell's own outcome into a sliding window rather
+      // than assuming strict ordering — robust to concurrent completions.
+      // If a clear majority of recent attempts had no BGC data, the CMEMS
+      // BGC worker is almost certainly down for this region — stop burning
+      // time retrying it and open the circuit for the rest of the run.
+      if (!this.bgcCircuitOpen) {
+        this.bgcRecentOutcomes.push(!!bioData);
+        if (this.bgcRecentOutcomes.length > RealCopernicusProvider.BGC_WINDOW_SIZE) {
+          this.bgcRecentOutcomes.shift();
+        }
+        const failuresInWindow = this.bgcRecentOutcomes.filter(had => !had).length;
+        if (
+          this.bgcRecentOutcomes.length >= RealCopernicusProvider.BGC_WINDOW_SIZE &&
+          failuresInWindow >= RealCopernicusProvider.BGC_FAILURE_THRESHOLD
+        ) {
+          this.bgcCircuitOpen = true;
+          console.warn(`   🔌 BGC circuit breaker tripped: ${failuresInWindow}/${this.bgcRecentOutcomes.length} of the last cells had no BGC data — skipping BGC (bio/nutrients/carbonate/PFT/plankton) for the rest of this run. Physics data is unaffected.`);
+        }
+      }
+
       // Try nutrients (no3, po4, si, fe) - separate dataset for split BGC models (GLO, NWS, MED)
       const nutrientDataset = this.datasetConfig?.nutrients;
-      if (nutrientDataset) {
+      if (nutrientDataset && !this.bgcCircuitOpen) {
         for (const dayOffset of stableDateFallbacks) {
           if (nutrientData) break;
 
@@ -564,7 +613,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
 
       // Try carbonate chemistry (ph) - separate dataset for split BGC models (GLO, NWS, MED)
       const carbonateDataset = this.datasetConfig?.carbonateChemistry;
-      if (carbonateDataset) {
+      if (carbonateDataset && !this.bgcCircuitOpen) {
         for (const dayOffset of stableDateFallbacks) {
           if (carbonateData) break;
 
@@ -605,7 +654,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
       // Try PFT (phytoplankton carbon) - separate dataset from bgc-bio
       const pftDataset = this.datasetConfig?.planktonFunctionalTypes || 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m';
       for (const dayOffset of stableDateFallbacks) {
-        if (pftData) break;
+        if (pftData || this.bgcCircuitOpen) break;
 
         const pftDate = new Date(start);
         pftDate.setDate(pftDate.getDate() - dayOffset);
@@ -643,7 +692,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
       // Try plankton (zooplankton carbon) - separate dataset from bgc-bio
       const planktonDataset = this.datasetConfig?.zooplankton || 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m';
       for (const dayOffset of stableDateFallbacks) {
-        if (planktonData) break;
+        if (planktonData || this.bgcCircuitOpen) break;
 
         const planktonDate = new Date(start);
         planktonDate.setDate(planktonDate.getDate() - dayOffset);
