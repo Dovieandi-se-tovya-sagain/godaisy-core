@@ -997,6 +997,25 @@ export async function ingestRectangles(
       targetLon = fallbackRect.centerLon;
     }
 
+    // FALLBACK_RECTANGLE_BY_CODE only covers a hand-picked set of European
+    // rectangle codes. If a rectangle's own coordinates are missing/blank AND
+    // it isn't in that list (any US/global rectangle, for example), don't
+    // silently ingest real weather data at (0, 0) — Null Island — under this
+    // rectangle's real code. Skip it and count it as a failure instead.
+    if (needsFallback && !fallbackRect) {
+      console.warn(`[conditions-ingest] Skipping ${rectangle.code}: no usable coordinates and no fallback entry`);
+      detail.failures.push({
+        code: rectangle.code,
+        region: 'Unknown',
+        attempts: 0,
+        metProbeLabel: null,
+      });
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+      continue;
+    }
+
     const result = await ingestRectangle(
       client,
       rectangle,
@@ -1095,6 +1114,14 @@ async function main() {
   if (failures.length) {
     logRegionSummary('Outstanding MET voids', failures);
     logCodeSample('MET void rectangle sample', failures, 12);
+  }
+
+  // A run that ingests zero rectangles is a silent outage, not a partial success —
+  // without this the process always exits 0, so the calling GitHub Actions workflow
+  // (which has no separate coverage-check step) has no way to detect it ever failed.
+  if (result.successCount === 0) {
+    console.error(`[conditions-ingest] 0/${rectangles.length} rectangles succeeded. Treating as failure.`);
+    process.exit(1);
   }
 }
 
