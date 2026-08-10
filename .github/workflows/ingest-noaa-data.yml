@@ -63,9 +63,37 @@ jobs:
       # the job if any attempted region failed. Previously continue-on-error
       # swallowed call-ingest-function.ts's exit(1) on zero successes entirely;
       # job.status stayed "success" no matter how many regions failed.
+      # One request for the entire 0.25-degree grid, replacing the per-region
+      # 100-cell fetches below on the schedule.
+      #
+      # ERDDAP's response time barely varies with how much data you ask for --
+      # measured 2026-08-09, a single point and the whole globe both took about
+      # 80s, because the cost is server-side queueing. The region steps spent
+      # ~400 single-point round trips per run to cover North American coast
+      # only; this covers all 7,649 cells in one, in roughly 20 seconds.
+      #
+      # It is also the fix for the throttling: NOAA returned 403 to every
+      # request from two repositories on 2026-08-10, and nothing short of a
+      # three-orders-of-magnitude cut in request count addresses that.
+      #
+      # The region steps are kept for manual dispatch -- they use a different
+      # dataset (noaacwBLENDEDsstDaily via the edge function) and remain the
+      # fallback if the bulk path has a bad day.
+      - name: Ingest global SST (bulk, all 7,649 cells)
+        id: bulk
+        if: github.event_name == 'schedule' || github.event.inputs.region == 'all' || github.event.inputs.region == 'bulk'
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          echo "🌍 Fetching the global SST grid in one request..."
+          npx tsx scripts/ingestion/ingest-noaa-sst-bulk.ts --write --compare
+
       - name: Ingest California (100 grids)
         id: california
-        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'california' || github.event_name == 'schedule'
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'california'
         continue-on-error: true
         run: |
           echo "🌊 Ingesting California coastal grids..."
@@ -73,7 +101,7 @@ jobs:
 
       - name: Ingest Florida (100 grids)
         id: florida
-        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'florida' || github.event_name == 'schedule'
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'florida'
         continue-on-error: true
         run: |
           echo "🌊 Ingesting Florida coastal grids..."
@@ -81,7 +109,7 @@ jobs:
 
       - name: Ingest New York (100 grids)
         id: newyork
-        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'newyork' || github.event_name == 'schedule'
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'newyork'
         continue-on-error: true
         run: |
           echo "🌊 Ingesting New York coastal grids..."
@@ -89,7 +117,7 @@ jobs:
 
       - name: Ingest Gulf of Mexico (100 grids)
         id: gulf
-        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'gulf' || github.event_name == 'schedule'
+        if: github.event.inputs.region == 'all' || github.event.inputs.region == 'gulf'
         continue-on-error: true
         run: |
           echo "🌊 Ingesting Gulf of Mexico grids..."
@@ -159,6 +187,7 @@ jobs:
         if: always()
         run: |
           declare -A outcomes=(
+            [BulkGlobal]="${{ steps.bulk.outcome }}"
             [California]="${{ steps.california.outcome }}"
             [Florida]="${{ steps.florida.outcome }}"
             [NewYork]="${{ steps.newyork.outcome }}"
