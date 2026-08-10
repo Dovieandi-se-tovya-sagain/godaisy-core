@@ -48,8 +48,6 @@
 import { config } from 'dotenv';
 import { resolve } from 'path';
 import { createClient } from '@supabase/supabase-js';
-import axios from 'axios';
-import * as readline from 'readline';
 
 config({ path: resolve(process.cwd(), '.env.local') });
 
@@ -73,44 +71,49 @@ const USER_AGENT =
   'fishfindr.eu marine data ingest (+https://fishfindr.eu; contact: damian@flyglobalmusic.com)';
 
 /**
- * Retry on the transient failures this server produces under load. 503 and 502
- * mean "busy, come back", and with only a handful of requests in the whole run
- * there is no risk of a retry storm -- whereas without this a single flaky
- * response kills a job that is otherwise 15 seconds of work. Observed: the .das
- * call 503'd on one attempt and succeeded moments later.
+ * Retry on the transient failures this server produces under load. 502/503 mean
+ * "busy, come back", and with only a handful of requests in the whole run there
+ * is no risk of a retry storm -- whereas without this a single flaky response
+ * kills a job that is otherwise 15 seconds of work. Observed: the .das call
+ * 503'd on one attempt and succeeded moments later.
+ *
+ * Uses the runtime's own fetch rather than axios. This repository does not
+ * depend on axios and it is not in the lockfile, so importing it would fail
+ * `npm ci` and the job would die at module load before making a single request.
+ * Node 20 has fetch, AbortSignal.timeout and web streams built in.
  */
-async function getWithRetry<T = unknown>(
-  url: string,
-  opts: { timeout: number; responseType?: 'stream' },
-  attempts = 4
-) {
+async function fetchWithRetry(url: string, timeoutMs: number, attempts = 4): Promise<Response> {
   let lastError: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
-      return await axios.get<T>(url, {
-        timeout: opts.timeout,
-        responseType: opts.responseType,
+      const response = await fetch(url, {
         headers: { 'User-Agent': USER_AGENT },
+        signal: AbortSignal.timeout(timeoutMs),
       });
+      if (response.ok) return response;
+
+      const retryable = response.status === 502 || response.status === 503 || response.status === 429;
+      if (!retryable || i === attempts - 1) {
+        throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
+      }
+      lastError = new Error(`HTTP ${response.status}`);
     } catch (error) {
       lastError = error;
-      const status = (error as { response?: { status?: number } }).response?.status;
-      const retryable = status === 502 || status === 503 || status === 429 || status === undefined;
-      if (!retryable || i === attempts - 1) throw error;
-      const waitMs = 5000 * Math.pow(2, i); // 5s, 10s, 20s
-      console.warn(`   ⏳ HTTP ${status ?? 'network'} — retrying in ${waitMs / 1000}s (${i + 1}/${attempts - 1})`);
-      await new Promise(r => setTimeout(r, waitMs));
+      // A timeout or network failure is worth one more try; a thrown non-retryable
+      // HTTP error above is not, and is rethrown on the final attempt below.
+      if (i === attempts - 1) throw error;
     }
+    const waitMs = 5000 * Math.pow(2, i); // 5s, 10s, 20s
+    console.warn(`   ⏳ ${String(lastError).slice(0, 80)} — retrying in ${waitMs / 1000}s (${i + 1}/${attempts - 1})`);
+    await new Promise(r => setTimeout(r, waitMs));
   }
   throw lastError;
 }
 
 /** Ask the dataset its most recent available time. */
 async function discoverLatestAvailableTime(): Promise<Date | null> {
-  const response = await getWithRetry<string>(`${ERDDAP_BASE_URL}/griddap/${DATASET_ID}.das`, {
-    timeout: 60000,
-  });
-  const match = String(response.data).match(
+  const response = await fetchWithRetry(`${ERDDAP_BASE_URL}/griddap/${DATASET_ID}.das`, 60000);
+  const match = (await response.text()).match(
     /\btime\s*\{[^}]*?actual_range\s+[\d.eE+-]+,\s*([\d.eE+-]+)/
   );
   if (!match) return null;
@@ -196,31 +199,35 @@ async function main() {
   console.log('🌐 Fetching the global grid in one request...');
   const started = Date.now();
 
-  const response = await getWithRetry<NodeJS.ReadableStream>(url, {
-    responseType: 'stream',
-    timeout: 300000,
-  });
+  const response = await fetchWithRetry(url, 300000);
+  if (!response.body) throw new Error('ERDDAP returned no response body');
 
   const values = new Map<string, number>(); // cell_id -> sst
   let rows = 0;
   let masked = 0;
   let bytes = 0;
 
-  const rl = readline.createInterface({ input: response.data, crlfDelay: Infinity });
+  // Stream and split by line as bytes arrive. The full response is ~45 MB and
+  // only ~7,600 of its 1,036,800 points are wanted, so nothing is buffered
+  // beyond the current line.
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = '';
   let lineNo = 0;
-  for await (const line of rl) {
+
+  const consume = (line: string) => {
     bytes += line.length + 1;
     lineNo++;
-    if (lineNo <= 2) continue; // header row, then units row
-    if (!line) continue;
+    if (lineNo <= 2) return; // header row, then units row
+    if (!line) return;
 
     // time,zlev,latitude,longitude,sst
     const parts = line.split(',');
-    if (parts.length < 5) continue;
+    if (parts.length < 5) return;
     rows++;
 
     const cellId = wanted.get(key(Number(parts[2]), Number(parts[3])));
-    if (!cellId) continue; // a point we have no cell for — most of the globe
+    if (!cellId) return; // a point we have no cell for — most of the globe
 
     const raw = parts[4];
     // ERDDAP writes a masked pixel as an empty field or NaN. Number('') is 0,
@@ -228,15 +235,27 @@ async function main() {
     // (fixed 90abfc6). Check the text before converting, never after.
     if (raw === '' || raw === 'NaN' || raw === undefined) {
       masked++;
-      continue;
+      return;
     }
     const v = Number(raw);
     if (!isFinite(v)) {
       masked++;
-      continue;
+      return;
     }
     values.set(cellId, v);
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    pending += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = pending.indexOf('\n')) >= 0) {
+      consume(pending.slice(0, nl).replace(/\r$/, ''));
+      pending = pending.slice(nl + 1);
+    }
   }
+  if (pending) consume(pending.replace(/\r$/, ''));
 
   const elapsed = (Date.now() - started) / 1000;
   console.log(
