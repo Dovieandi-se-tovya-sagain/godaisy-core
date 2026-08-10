@@ -489,15 +489,40 @@ function getGlobalFallback(variable: DataVariable): ProductConfig[] {
         coverage: 'GLOBAL_ANALYSIS_FORECAST',
       }];
     
+    // These two were pointed at OCEANCOLOUR_GLO_BGC_L4_NRT_009_102, which is a
+    // PRODUCT id, not a dataset id. The toolbox resolves datasets, so the
+    // request could never succeed, and every region without its own bundle --
+    // i.e. everything outside IBI/MED/BAL/BLK/NWS -- silently lost chlorophyll
+    // and clarity. Measured 2026-08-10: the mapped regions sit at 93-99% Kd490
+    // coverage (IBI 105/106, NWS 797/800, BAL 661/707) while the global cells,
+    // 3,431 of them, sit at 27-43%.
+    //
+    // Both dataset ids below are the global twins of the Atlantic ones IBI
+    // already uses -- same family, same l4-gapfree construction, 4 km instead of
+    // 1 km. Our cells are 0.25 degrees (~25 km), so 4 km is finer than we need.
+    // Confirmed present in the Copernicus STAC catalogue on 2026-08-10 under
+    // OCEANCOLOUR_GLO_BGC_L4_NRT_009_102 rather than guessed.
+    //
+    // Chlorophyll and clarity live in DIFFERENT datasets within that product
+    // (plankton vs transp), which the single shared entry could not express.
     case 'chlorophyll':
+      return [{
+        datasetId: 'cmems_obs-oc_glo_bgc-plankton_nrt_l4-gapfree-multi-4km_P1D',
+        variables: ['CHL'],
+        source: 'global-fallback',
+        quality: 'interpolated',  // l4-gapfree fills cloud gaps; see note below
+        resolution: '4km',
+        coverage: 'GLOBAL_OCEANCOLOUR_L4_GAPFREE',
+      }];
+
     case 'clarity':
       return [{
-        datasetId: 'OCEANCOLOUR_GLO_BGC_L4_NRT_009_102',
-        variables: variable === 'chlorophyll' ? ['CHL'] : ['KD490'],
+        datasetId: 'cmems_obs-oc_glo_bgc-transp_nrt_l4-gapfree-multi-4km_P1D',
+        variables: ['KD490'],
         source: 'global-fallback',
-        quality: 'satellite',
+        quality: 'interpolated',
         resolution: '4km',
-        coverage: 'GLOBAL_OCEANCOLOUR',
+        coverage: 'GLOBAL_OCEANCOLOUR_L4_GAPFREE',
       }];
     
     case 'nitrate':
