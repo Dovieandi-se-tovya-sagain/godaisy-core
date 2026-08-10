@@ -318,6 +318,38 @@ export class RealCopernicusProvider implements CopernicusProvider {
       // older data would already have been fetched by a previous run.
       // Dynamic data (currents/waves): max 1 day back
       const stableDateFallbacks = [0, 1]; // days back for stable data
+
+      // Satellite optical products need a much wider window than model output.
+      //
+      // Kd490 comes from a daily L3 ocean-colour feed, and cloud decides whether
+      // a given pixel has a retrieval that day. Probed 2026-08-10 against the
+      // live datasets: the same 0.5-degree window swings from 0% to 95% valid
+      // pixels depending on the day. One control cell in the NWS region holds a
+      // stored value of 0.1203 yet returned 0 of 43,776 valid pixels when
+      // re-requested.
+      //
+      // With only [0, 1] a cell needed today or yesterday to be clear over that
+      // exact spot. A null never overwrites a stored value, so coverage is
+      // cumulative: whether a cell has ever caught a clear day, not whether it
+      // caught one today. That, not configuration, produced the coverage split
+      // measured the same day at equal latitude:
+      //
+      //     copernicus-NWS  747 cells  99.6%     copernicus-GLO  223 cells  ~43%
+      //     copernicus-BAL  413 cells  99.0%     copernicus-MED   89 cells  42.7%
+      //
+      // NWS and BAL have simply banked more clear days. The regions are not
+      // configured differently in any way that matters -- MED is a correctly
+      // configured regional 1km L3 product sitting at half of NWS.
+      //
+      // A week is well within this feed's normal latency, and each extra offset
+      // only costs a request when the earlier ones found nothing: the loop
+      // breaks on the first success, so a clear cell still costs exactly one.
+      //
+      // Deliberately NOT applied to the model fetches (temperature, MLD, BGC,
+      // nutrients, carbonate, PFT, plankton, waves). Those are gridded model
+      // output where a miss usually means land, not cloud, so retrying six more
+      // days would multiply requests for no gain.
+      const satelliteDateFallbacks = [0, 1, 2, 3, 5, 7];
       const dynamicDateFallbacks = [0, 1]; // days back for dynamic data
       let successfulDate: string = start;
       let daysBack = 0;
@@ -476,7 +508,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
       if (temperatureData) {
         const successfulPadding = paddings.find(_p => temperatureData !== null) || paddings[0];
 
-        for (const dayOffset of stableDateFallbacks) {
+        for (const dayOffset of satelliteDateFallbacks) {
           if (transparencyData) break;
 
           const transDate = new Date(start);
@@ -496,8 +528,8 @@ export class RealCopernicusProvider implements CopernicusProvider {
               console.log(`   ✅ Transparency data (kd490) found with ${successfulPadding}° padding${ageNote}`);
             }
           } catch (_err) {
-            if (dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1]) {
-              console.warn(`   ⚠️  No transparency data available (satellite gaps after ${stableDateFallbacks.length} days)`);
+            if (dayOffset === satelliteDateFallbacks[satelliteDateFallbacks.length - 1]) {
+              console.warn(`   ⚠️  No transparency data available (satellite gaps after ${satelliteDateFallbacks.length} days)`);
             }
           }
         }
