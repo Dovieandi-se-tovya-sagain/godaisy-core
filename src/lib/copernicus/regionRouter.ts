@@ -22,8 +22,14 @@ export interface CopernicusDatasetConfig {
   //                    product already fetched for mlotst carries `tob`
   //   NWS              physics is GLO's split thetao (no bottom field) and its MLD
   //                    product is mlotst-only — no bottom temperature available
-  //   MED / BLK        their physics dataset ids do not resolve at all (see the notes
-  //                    on those cases), so there is nothing to attach it to
+  //   MED              `describe` will not resolve its dataset id, so its variable list
+  //                    could not be confirmed — but the id demonstrably works for
+  //                    `subset`: copernicus-MED holds surface temperature on 1,469 of
+  //                    its 1,470 cells, written within the hour. Left unset because it
+  //                    is unconfirmed, not because it is known absent. Worth settling —
+  //                    MED is the single largest region.
+  //   BLK              unreachable: no cell is ever routed here. Black Sea cells come
+  //                    out of getCmemsRegion as MED or GLO_AF.
   bottomTemperature?: { source: 'physics' | 'mixedLayerDepth'; variable: 'bottomT' | 'tob' };
   biogeochemistry: string;
   planktonFunctionalTypes?: string;  // PFT dataset for phytoplankton carbon (phyc)

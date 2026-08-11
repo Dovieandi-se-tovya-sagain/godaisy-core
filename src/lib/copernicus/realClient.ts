@@ -307,7 +307,17 @@ export class RealCopernicusProvider implements CopernicusProvider {
       // (see `bottomTemperature` in regionRouter). Requesting it from a product that
       // lacks it fails that whole call, so regions where it was not confirmed present
       // leave the config unset and simply keep the variable lists they had.
-      const bottomTemp = this.datasetConfig?.bottomTemperature;
+      //
+      // The no-config case is not an edge case, it is the majority: getProvider passes
+      // undefined for every GLO_AM / GLO_AP / GLO_AF cell (3,568 of the 7,649 in
+      // grid_conditions_latest), so datasetConfig is unset and the hardcoded defaults
+      // above apply — which ARE the GLO datasets. Route bottom temperature the same way
+      // GLO does, or the largest group of cells silently gets nothing. A config that
+      // exists but omits bottomTemperature is a deliberate "not available in this
+      // region" and is left alone.
+      const bottomTemp = this.datasetConfig
+        ? this.datasetConfig.bottomTemperature
+        : { source: 'mixedLayerDepth' as const, variable: 'tob' as const };
       const temperatureVariables = bottomTemp?.source === 'physics'
         ? ['thetao', bottomTemp.variable]
         : ['thetao'];
