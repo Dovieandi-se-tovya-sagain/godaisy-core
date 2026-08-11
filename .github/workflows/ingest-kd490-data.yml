@@ -113,7 +113,17 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           echo "📊 Checking Kd490 data coverage..."
-          npx tsx -e "(async () => { const { createClient } = await import('@supabase/supabase-js'); const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY); const { count: totalCount } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }); const { count: kd490Count } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).contains('sources', ['erdMH1kd490mday.k490']); const { count: nonNullCount } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).not('kd490', 'is', null); console.log('📊 Kd490 Data Coverage:'); console.log('  Total grids with any data: ' + totalCount + ' / 65,884'); console.log('  Grids with Kd490 source: ' + kd490Count); console.log('  Grids with non-null Kd490: ' + nonNullCount); console.log('  Coverage: ' + ((kd490Count/65884*100).toFixed(2)) + '%'); })()"
+          # The denominator is queried, not hardcoded. It used to be a literal
+          # 65,884 while the grid held 7,649, so every run understated coverage
+          # by 8.6x. See src/lib/findr/gridCellLookup.ts.
+          #
+          # Note on the source-tagged count: grid_conditions_latest.sources is
+          # REPLACED on each write and holds exactly one element, so it names
+          # whoever wrote last, not every source feeding the cell. Copernicus
+          # BGC overwrites the tag minutes after the satellite run, which is
+          # why that number reads ~5 while thousands of cells hold a Kd490
+          # value. Coverage is measured on the value, not the tag.
+          npx tsx -e "(async () => { const { createClient } = await import('@supabase/supabase-js'); const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY); const q = async (label, builder) => { const { count, error } = await builder; if (error) { console.error('❌ ' + label + ' count failed: ' + error.message); process.exit(1); } if (typeof count !== 'number') { console.error('❌ ' + label + ' returned no count'); process.exit(1); } return count; }; const totalCount = await q('total cells', supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true })); if (totalCount === 0) { console.error('❌ grid_conditions_latest is empty — coverage is undefined, not 0%'); process.exit(1); } const kd490Count = await q('source-tagged', supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).contains('sources', ['erdMH1kd490mday.k490'])); const nonNullCount = await q('non-null Kd490', supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).not('kd490', 'is', null)); console.log('📊 Kd490 Data Coverage:'); console.log('  Total grid cells: ' + totalCount); console.log('  Cells last written by the Kd490 source: ' + kd490Count + ' (see note)'); console.log('  Cells holding a Kd490 value: ' + nonNullCount); console.log('  Coverage: ' + ((nonNullCount/totalCount*100).toFixed(2)) + '% (cumulative — a null never overwrites a stored value)'); })()"
 
       - name: Report status
         if: always()
