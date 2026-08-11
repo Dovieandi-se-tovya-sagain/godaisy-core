@@ -16,6 +16,7 @@ on:
         default: 'all'
         type: choice
         options:
+          - bulk
           - all
           - california
           - florida
@@ -170,7 +171,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           echo "📊 Checking current data coverage..."
-          npx tsx -e "(async () => { const { createClient } = await import('@supabase/supabase-js'); const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY); const { count: totalCount } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }); const { count: noaaCountOld } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).contains('sources', ['ncdcOisst21Agg_LonPM180.sst']); const { count: noaaCountNew } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).contains('sources', ['noaacwBLENDEDsstDaily.analysed_sst']); const noaaCount = noaaCountOld + noaaCountNew; const { count: mockCount } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).contains('sources', ['MOCK_DATA_FOR_TESTING']); console.log('📊 Data Coverage Summary:'); console.log('  Total grids with data: ' + totalCount + ' / 65,884 (' + (totalCount/65884*100).toFixed(2) + '%'); console.log('  Real NOAA grids (old dataset): ' + noaaCountOld); console.log('  Real NOAA grids (new dataset): ' + noaaCountNew); console.log('  Real NOAA grids (total): ' + noaaCount); console.log('  Mock data grids: ' + mockCount); console.log('  Real data coverage: ' + ((noaaCount/(noaaCount+mockCount))*100).toFixed(1) + '%'); })()"
+          npx tsx -e "(async () => { const { createClient } = await import('@supabase/supabase-js'); const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY); const { count: totalCount } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }); const { count: noaaCountOld } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).contains('sources', ['ncdcOisst21Agg_LonPM180.sst']); const { count: noaaCountNew } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).contains('sources', ['noaacwBLENDEDsstDaily.analysed_sst']); const noaaCount = noaaCountOld + noaaCountNew; const { count: mockCount } = await supabase.from('grid_conditions_latest').select('*', { count: 'exact', head: true }).contains('sources', ['MOCK_DATA_FOR_TESTING']); console.log('📊 Data Coverage Summary:'); console.log('  Total grids with data: ' + totalCount + ' / 7,649 (' + (totalCount/7649*100).toFixed(2) + '%'); console.log('  Real NOAA grids (old dataset): ' + noaaCountOld); console.log('  Real NOAA grids (new dataset): ' + noaaCountNew); console.log('  Real NOAA grids (total): ' + noaaCount); console.log('  Mock data grids: ' + mockCount); console.log('  Real data coverage: ' + ((noaaCount/(noaaCount+mockCount))*100).toFixed(1) + '%'); })()"
 
       # This is the step that actually gates the job. `continue-on-error` on
       # the region steps above means their individual failures never fail the
