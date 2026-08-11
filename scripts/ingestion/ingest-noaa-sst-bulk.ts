@@ -84,30 +84,56 @@ const USER_AGENT =
  */
 async function fetchWithRetry(url: string, timeoutMs: number, attempts = 4): Promise<Response> {
   let lastError: unknown;
+
   for (let i = 0; i < attempts; i++) {
+    const isLast = i === attempts - 1;
+    let response: Response;
+
     try {
-      const response = await fetch(url, {
+      response = await fetch(url, {
         headers: { 'User-Agent': USER_AGENT },
         signal: AbortSignal.timeout(timeoutMs),
       });
-      if (response.ok) return response;
-
-      const retryable = response.status === 502 || response.status === 503 || response.status === 429;
-      if (!retryable || i === attempts - 1) {
-        throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
-      }
-      lastError = new Error(`HTTP ${response.status}`);
     } catch (error) {
+      // Timeouts and network failures are always worth another try.
       lastError = error;
-      // A timeout or network failure is worth one more try; a thrown non-retryable
-      // HTTP error above is not, and is rethrown on the final attempt below.
-      if (i === attempts - 1) throw error;
+      if (isLast) throw error;
+      await backoff(i, error);
+      continue;
     }
-    const waitMs = 5000 * Math.pow(2, i); // 5s, 10s, 20s
-    console.warn(`   ⏳ ${String(lastError).slice(0, 80)} — retrying in ${waitMs / 1000}s (${i + 1}/${attempts - 1})`);
-    await new Promise(r => setTimeout(r, waitMs));
+
+    if (response.ok) return response;
+
+    // Free the connection before sleeping. Node's fetch keeps the socket busy
+    // until the body is consumed or cancelled, so retrying without this leaks
+    // one connection per attempt.
+    try {
+      await response.body?.cancel();
+    } catch {
+      // Best effort — a failure to cancel must not mask the HTTP error.
+    }
+
+    const retryable = response.status === 502 || response.status === 503 || response.status === 429;
+    const httpError = new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
+
+    // Non-retryable statuses must fail immediately. Previously this threw from
+    // inside the try, so its own catch swallowed it and the loop slept and
+    // retried anyway -- a 404 cost 35s of backoff before surfacing, and the
+    // comment claiming otherwise was simply wrong.
+    if (!retryable) throw httpError;
+    if (isLast) throw httpError;
+
+    lastError = httpError;
+    await backoff(i, httpError);
   }
+
   throw lastError;
+}
+
+async function backoff(attempt: number, reason: unknown): Promise<void> {
+  const waitMs = 5000 * Math.pow(2, attempt); // 5s, 10s, 20s
+  console.warn(`   ⏳ ${String(reason).slice(0, 80)} — retrying in ${waitMs / 1000}s`);
+  await new Promise(r => setTimeout(r, waitMs));
 }
 
 /** Ask the dataset its most recent available time. */
@@ -255,6 +281,7 @@ async function main() {
       pending = pending.slice(nl + 1);
     }
   }
+  pending += decoder.decode(); // flush: a multi-byte char split across chunks
   if (pending) consume(pending.replace(/\r$/, ''));
 
   const elapsed = (Date.now() - started) / 1000;
