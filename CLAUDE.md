@@ -62,3 +62,27 @@ Measure it.
   `findr`'s `ingest-europe` is the exception and must keep running: it is the only writer of the
   CMEMS marine columns into `findr_conditions_snapshots`, despite this repo having a script of
   the same filename that writes a different table.
+
+## Before merging any pull request
+
+**Read the reviews, not just the checks.** `gh pr checks` reporting "no checks reported on the
+branch" means CI is not configured — it does not mean nobody has commented.
+
+On 2026-08-11 six PRs were merged unread. Copilot had left eleven review comments across three of
+them, and three were real defects in code already running in production: a retry loop that backed
+off 35 seconds on a 404, a leaked connection per retry, and a `TextDecoder` that dropped
+multi-byte characters split across chunk boundaries.
+
+```bash
+gh api "repos/{owner}/{repo}/pulls/N/reviews"  -q '.[] | .user.login+" ["+.state+"] "+(.body//"")'
+gh api "repos/{owner}/{repo}/pulls/N/comments" -q '.[] | .path+":"+((.line//0)|tostring)+"  "+.body'
+```
+
+Both. `reviews` carries the summary verdict; `comments` carries the inline findings, and the
+inline ones are where the defects are — a review can be `COMMENTED` with a clean-sounding summary
+and still hold three bugs underneath.
+
+**A review that contradicts your own commit message is a reason to check, not to argue.** One of
+those eleven claimed the grid was 65,884 cells rather than 7,649. Measuring showed the reviewer
+was wrong and the repo's own constant was stale — which meant the coverage step had been reporting
+progress against a denominator 8.6× too large. Verifying the objection found a second bug.
