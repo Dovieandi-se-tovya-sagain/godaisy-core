@@ -10,6 +10,14 @@
  * - Cell IDs: "G025_N4075W07400" format (Grid 0.25deg, center lat×100, center lon×100)
  * - Compatible with rectangles_025deg, rectangles_unified, grid_conditions_latest tables
  *
+ * rectangles_025deg and rectangles_025deg_api are NOT two names for one view.
+ * Both cover the same 7,649 cells keyed by rectangle_code, and differ in the
+ * bounds they expose:
+ *   rectangles_025deg      lat_min/lat_max/lon_min/lon_max, row_ix, col_ix, centroid
+ *   rectangles_025deg_api  lat_north/lat_south/lon_east/lon_west, center_lat, center_lon
+ * Picking the wrong one gets you a column that does not exist, so the two
+ * names below are deliberate rather than a typo to be tidied away.
+ *
  * Database Tables (row counts measured 2026-08-11 — see the warning below):
  * - rectangles_025deg_api: 7,649 global grid cells with PostGIS geometry
  * - rectangles_unified: Combines both ICES and 0.25° grid (7,948 rows)
