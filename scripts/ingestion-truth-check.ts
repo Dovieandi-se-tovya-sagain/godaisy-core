@@ -77,15 +77,22 @@ interface TodayRow {
   [key: string]: unknown;
 }
 
-function today(): string {
-  return new Date().toISOString().split('T')[0];
-}
+/**
+ * Computed once, at start, and reused.
+ *
+ * Calling new Date() per use means a run straddling midnight UTC can query one
+ * snapshot_day and threshold against the next — the check would then report on
+ * a day that had barely begun and call an empty table a failure. The scheduled
+ * run is at 09:00 so it is not near the boundary today, but a cron time is a
+ * setting someone changes, and this is a fixed cost of one line.
+ */
+const TODAY = new Date().toISOString().split('T')[0];
 
 async function loadToday(): Promise<TodayRow[]> {
   const { data, error } = await supabase
     .from('findr_conditions_snapshots')
     .select(['rectangle_code', 'source', 'captured_at', ...TRACKED_FIELDS].join(','))
-    .eq('snapshot_day', today());
+    .eq('snapshot_day', TODAY);
 
   if (error) throw new Error(`Could not load today's snapshots: ${error.message}`);
   return (data ?? []) as unknown as TodayRow[];
@@ -103,7 +110,7 @@ function checkRowsWritten(rows: TodayRow[]) {
   record(
     rows.length === 0 ? 'fail' : rows.length < 100 ? 'warn' : 'pass',
     'rows written today',
-    `${rows.length} rectangles have a row for ${today()}`,
+    `${rows.length} rectangles have a row for ${TODAY}`,
     rows.length === 0
       ? 'nothing has been written today — the ingestion is not running, whatever the workflow says'
       : rows.length < 100

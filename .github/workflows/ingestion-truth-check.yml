@@ -103,3 +103,37 @@ jobs:
                 body: `Still failing at ${new Date().toISOString()}\n\n${runUrl}`,
               });
             }
+
+      # An alert that never clears is an alert nobody believes. Without this the
+      # incident stays open after the pipeline recovers, and the next person to
+      # look cannot tell a live problem from a stale one -- which is how the
+      # tide waterfall sat visibly broken for a month. A monitor has to be able
+      # to say "fixed", not only "broken".
+      - name: Close the failure issue on recovery
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'ingestion-truth-check',
+            });
+
+            for (const issue of issues.data) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `Recovered — all assertions passed at ${new Date().toISOString()}\n\n${runUrl}`,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+                state_reason: 'completed',
+              });
+            }
