@@ -10,10 +10,22 @@
  * - Cell IDs: "G025_N4075W07400" format (Grid 0.25deg, center lat×100, center lon×100)
  * - Compatible with rectangles_025deg, rectangles_unified, grid_conditions_latest tables
  *
- * Database Tables:
- * - rectangles_025deg_api: 65,884 global grid cells with PostGIS geometry
- * - rectangles_unified: Combines both ICES and 0.25° grid (66,168 rows)
- * - grid_conditions_latest: Environmental data (1,082 rows, growing)
+ * Database Tables (row counts measured 2026-08-11 — see the warning below):
+ * - rectangles_025deg_api: 7,649 global grid cells with PostGIS geometry
+ * - rectangles_unified: Combines both ICES and 0.25° grid (7,948 rows)
+ * - grid_conditions_latest: Environmental data (7,649 rows)
+ *
+ * These counts were previously recorded as 65,884 / 66,168 / 1,082 and went
+ * stale without anyone noticing, because nothing reads them — they are prose.
+ * The cost was not the comment. A reviewer read 65,884 here and filed it as a
+ * finding against a PR that said 7,649, and the coverage steps in the NOAA,
+ * chlorophyll and Kd490 workflows had been dividing by 65,884 for months,
+ * reporting every feed at about an eighth of its real coverage. A wrong
+ * number in a comment gets copied into somewhere it does matter.
+ *
+ * So: do not trust these figures, measure. `SELECT COUNT(*)` settles it in a
+ * second, and any workflow that needs a denominator should query for it
+ * rather than hardcode one from here.
  *
  * US Waters Coverage:
  * - Atlantic: 24°N-48°N, 80°W-60°W
