@@ -717,8 +717,11 @@ async function buildOpenMeteoMarineFallback(
       // right conversion. Left at Open-Meteo's default of km/h this would
       // overstate wind by 3.6x -- plausible-looking and silent, which is how
       // this pipeline usually gets hurt.
+      // toKnots already rounds to 1dp and returns null on non-finite input,
+      // so no toFixedOrNull wrapper here -- matching how the marine path above
+      // calls it.
       const windMs = at(windSpeeds);
-      if (windMs !== null) weatherWindSpeedKts = toFixedOrNull(toKnots(windMs), 1);
+      if (windMs !== null) weatherWindSpeedKts = toKnots(windMs);
 
       const windDir = at(windDirections);
       if (windDir !== null) weatherWindDirectionDeg = toFixedOrNull(windDir, 0);
