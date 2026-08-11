@@ -17,7 +17,7 @@ module.exports = {
   roots: ['<rootDir>/src', '<rootDir>/scripts'],
   testMatch: ['**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts'],
   transform: {
-    '^.+\\.tsx?$': ['ts-jest', { diagnostics: false, isolatedModules: true }],
+    '^.+\\.tsx?$': ['ts-jest', { diagnostics: false }],
   },
   clearMocks: true,
 };
