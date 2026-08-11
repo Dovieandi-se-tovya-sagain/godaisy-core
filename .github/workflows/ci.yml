@@ -1,0 +1,89 @@
+name: CI
+
+# The first pull_request gate this repository has ever had.
+#
+# Until now nothing ran on PRs, which is why `gh pr checks` answered "no checks
+# reported on the branch" — routinely misread as "nothing to worry about" when
+# it actually meant "nothing is checking". Six PRs were merged unread on
+# 2026-08-11 on the strength of that reading, three of them carrying real
+# defects. This is the other half of the fix that CLAUDE.md's "read the reviews"
+# rule started.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  test:
+    name: Tests
+    # Pinned rather than ubuntu-latest, matching the Copernicus workflows: a
+    # drifting runner image is one more thing that can change under a pipeline
+    # whose failures are already hard to tell apart from its data.
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Run tests
+        run: npm test -- --ci
+
+  typecheck:
+    name: Typecheck (ratchet)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      # A ratchet, not a pass/fail gate. `tsc --noEmit` reports 160 errors on
+      # main — mostly missing optional dependencies (TS2307: stripe, deepl-node,
+      # dayjs) and implicit any (TS7006). Demanding zero would mean blocking
+      # every PR behind an unrelated cleanup, so this only asserts the count
+      # does not GROW. Lower BASELINE as the backlog is worked down; the job
+      # tells you when it can be lowered.
+      #
+      # Counts "error TS" occurrences rather than output lines. Multi-line
+      # diagnostics make the line count read ~40 higher than the error count,
+      # and keying a gate off the wrong one of those is how you get a threshold
+      # nobody can reason about.
+      - name: Typecheck must not regress
+        run: |
+          BASELINE=160
+          count=$(npx tsc --noEmit 2>&1 | grep -cE "error TS" || true)
+          echo "tsc errors: $count (baseline $BASELINE)"
+          if [ "$count" -gt "$BASELINE" ]; then
+            echo "::error::Typecheck regressed: $count errors, baseline $BASELINE. New type errors were introduced."
+            npx tsc --noEmit 2>&1 | grep -E "error TS" | head -40
+            exit 1
+          fi
+          if [ "$count" -lt "$BASELINE" ]; then
+            echo "::notice::Typecheck improved to $count errors — lower BASELINE in .github/workflows/ci.yml to lock the gain in."
+          fi
