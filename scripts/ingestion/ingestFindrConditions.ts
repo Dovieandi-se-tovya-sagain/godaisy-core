@@ -933,8 +933,44 @@ export async function ingestRectangle(
         : 'ingest:stormglass',
   };
 
-  const { error } = await client.from('findr_conditions_snapshots').upsert(row as any, {
-    onConflict: 'rectangle_code,captured_at',
+  // Upsert on the constraint that is actually enforced, and never let one source
+  // erase another's coverage.
+  //
+  // Two unique indexes exist on this table:
+  //
+  //     findr_conditions_snapshots_rectangle_captured_at_idx (rectangle_code, captured_at)
+  //     uniq_snap_rect_day                                   (rectangle_code, snapshot_day)
+  //
+  // snapshot_day is derived from captured_at by trg_set_snapshot_day. This
+  // upsert targeted captured_at, which is the run timestamp and therefore never
+  // collides -- so Postgres fell through to a plain INSERT and hit
+  // uniq_snap_rect_day instead: 23505, every row, on every run after the first
+  // of the day. Observed 2026-08-11, when the 01:55 MET run inserted cleanly and
+  // the 07:11 one failed all 324 rectangles. MET runs four times a day, so three
+  // of those four were failing every day.
+  //
+  // Stripping nulls matters as much as the conflict target. MET Norway and
+  // Open-Meteo are equally good and have DIFFERENT coverage -- MET is preferred
+  // only because it is free and unlimited where Open-Meteo is discretionary --
+  // so the point of running both is that each fills gaps the other leaves. The
+  // row below names every column explicitly, and any of them may be null. Once
+  // the conflict target is corrected, a later run would write those nulls over
+  // fields an earlier source had filled, quietly deleting the coverage the
+  // second source exists to provide. Only columns this run actually has a value
+  // for are sent.
+  //
+  // rectangle_code, captured_at and source are always sent: the first two are
+  // the identity and the trigger's input, and source records which feed last
+  // contributed.
+  const ALWAYS_SEND = new Set(['rectangle_code', 'captured_at', 'source']);
+  const writableRow = Object.fromEntries(
+    Object.entries(row).filter(
+      ([key, value]) => ALWAYS_SEND.has(key) || (value !== null && value !== undefined),
+    ),
+  );
+
+  const { error } = await client.from('findr_conditions_snapshots').upsert(writableRow as any, {
+    onConflict: 'rectangle_code,snapshot_day',
   });
 
   if (error) {
