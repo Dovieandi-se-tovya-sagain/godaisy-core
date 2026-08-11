@@ -155,12 +155,22 @@ async function fetchNOAATides(lat: number, lon: number): Promise<Array<{ time: s
   }
 }
 
+type TideSource = 'worldtides' | 'noaa' | 'stormglass' | 'none';
+
 interface IngestRectangleResult {
   success: boolean;
   source: IngestSource;
   metProbeAttempts: number;
   metProbeSuccessLabel: string | null;
   lastProbeLabel: string | null;
+  /**
+   * Which tier of the tide waterfall actually delivered, so the run can report
+   * a zero once instead of warning 324 times. fetchWorldTides already logged
+   * "API key not configured" per rectangle; that ran every day from 2026-07-17
+   * and nobody read it, because 324 identical lines in a 5,000-line log are
+   * indistinguishable from noise. A single summary line is not.
+   */
+  tideSource: TideSource;
 }
 
 interface CoverageDetailEntry {
@@ -823,6 +833,7 @@ export async function ingestRectangle(
         metProbeAttempts,
         metProbeSuccessLabel: null,
         lastProbeLabel,
+        tideSource: 'none',
       } satisfies IngestRectangleResult;
     }
 
@@ -839,6 +850,7 @@ export async function ingestRectangle(
         metProbeAttempts,
         metProbeSuccessLabel: null,
         lastProbeLabel,
+        tideSource: 'none',
       } satisfies IngestRectangleResult;
     }
     dataSource = 'stormglass';
@@ -874,7 +886,11 @@ export async function ingestRectangle(
   let tidesRaw: StormglassTideResponse | null = null;
   if (!tideData && dataSource === 'stormglass' && stormglassKey) {
     const sgKey = stormglassKey;
-    tidesRaw = await fetchStormglassTides(lat, lon, sgKey) as Promise<StormglassTideResponse | null>;
+    // Cast the RESOLVED value, not a Promise. `await x as Promise<T>` labels
+    // the already-awaited result as a Promise -- harmless at runtime, but it
+    // tells the type system the opposite of the truth, in the tier that is
+    // supposed to be the tide safety net.
+    tidesRaw = (await fetchStormglassTides(lat, lon, sgKey)) as StormglassTideResponse | null;
     if (tidesRaw && tidesRaw.data) {
       tideData = tidesRaw.data;
       tideSource = 'stormglass';
@@ -885,7 +901,7 @@ export async function ingestRectangle(
   // Fetch bio data from Stormglass if available
   let bioRaw: StormglassBioResponse | null = null;
   if (dataSource === 'stormglass' && stormglassKey) {
-    bioRaw = await fetchStormglassBio(lat, lon, start.toISOString(), end.toISOString(), undefined, stormglassKey) as Promise<StormglassBioResponse | null>;
+    bioRaw = (await fetchStormglassBio(lat, lon, start.toISOString(), end.toISOString(), undefined, stormglassKey)) as StormglassBioResponse | null;
   }
 
   const hourlySeries = metMarine
@@ -1029,6 +1045,7 @@ export async function ingestRectangle(
       metProbeAttempts,
       metProbeSuccessLabel,
       lastProbeLabel,
+      tideSource,
     } satisfies IngestRectangleResult;
   }
 
@@ -1039,6 +1056,7 @@ export async function ingestRectangle(
     metProbeAttempts,
     metProbeSuccessLabel,
     lastProbeLabel,
+    tideSource,
   } satisfies IngestRectangleResult;
 }
 
@@ -1053,10 +1071,16 @@ export async function ingestRectangles(
   rectangles: TargetRectangle[],
   stormglassKey: string | undefined,
   options: IngestRectanglesOptions = {},
-): Promise<{ successCount: number; capturedAtISO: string; detail: CoverageDetails }> {
+): Promise<{
+  successCount: number;
+  capturedAtISO: string;
+  detail: CoverageDetails;
+  tideCounts: Record<TideSource, number>;
+}> {
   const delayMs = options.delayBetweenRequestsMs ?? 300;
   const capturedAt = options.capturedAtISO ?? new Date().toISOString();
   let successCount = 0;
+  const tideCounts: Record<TideSource, number> = { worldtides: 0, noaa: 0, stormglass: 0, none: 0 };
 
   const metOnly = Boolean(options.metOnly);
   const detail: CoverageDetails = {
@@ -1119,6 +1143,7 @@ export async function ingestRectangles(
 
     if (result.success) {
       successCount += 1;
+      tideCounts[result.tideSource] += 1;
       if (result.source === 'met') {
         detail.metSuccess.push(entry);
       } else if (result.source === 'openmeteo') {
@@ -1134,7 +1159,7 @@ export async function ingestRectangles(
     }
   }
 
-  return { successCount, capturedAtISO: capturedAt, detail };
+  return { successCount, capturedAtISO: capturedAt, detail, tideCounts };
 }
 
 async function main() {
@@ -1178,6 +1203,33 @@ async function main() {
   console.info(
     `[conditions-ingest] Coverage summary — MET primary/extended: ${metSuccess.length}, Open-Meteo fallback: ${openMeteoEntries.length}, Stormglass fallback: ${stormglassEntries.length}, Unresolved MET voids: ${failures.length}`
   );
+
+  // Tides get their own line, and a zero shouts.
+  //
+  // Every tier of the waterfall was unreachable from 2026-07-17 to 2026-08-11:
+  // WorldTides returned null at its key check because WORLDTIDES_API_KEY was
+  // never passed by either workflow, NOAA only covers North American coasts and
+  // every rectangle here is European, and Stormglass requires
+  // dataSource === 'stormglass' which these runs never are. Result:
+  // next_high_tide_iso null in all 7,000 rows.
+  //
+  // fetchWorldTides did warn, once per rectangle, every run. 324 identical
+  // lines buried in a 5,000-line log is not a signal, and a month of them went
+  // unread. One line that names the number is.
+  const { tideCounts } = result;
+  const tidesResolved = tideCounts.worldtides + tideCounts.noaa + tideCounts.stormglass;
+  const tideLine =
+    `[conditions-ingest] Tide coverage — WorldTides: ${tideCounts.worldtides}, NOAA: ${tideCounts.noaa}, ` +
+    `Stormglass: ${tideCounts.stormglass}, no tide data: ${tideCounts.none}`;
+  if (tidesResolved === 0 && result.successCount > 0) {
+    console.warn(`${tideLine}  ❌ NO RECTANGLE GOT TIDES`);
+    console.warn(
+      '[conditions-ingest] Every tide tier failed. Check WORLDTIDES_API_KEY is set — ' +
+        'without it tier 1 returns null immediately, and tiers 2 and 3 do not apply to European rectangles.'
+    );
+  } else {
+    console.info(tideLine);
+  }
 
   const recoveredViaExtended = metSuccess.filter((entry) => entry.metProbeLabel && entry.metProbeLabel !== 'primary');
   if (recoveredViaExtended.length) {
