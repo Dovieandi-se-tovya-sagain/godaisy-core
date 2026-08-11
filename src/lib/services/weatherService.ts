@@ -1757,10 +1757,16 @@ export async function fetchOpenMeteoWeather(lat: number, lon: number, startDate:
   url.searchParams.set('timezone', 'auto');
   url.searchParams.set('start_date', startDate);
   url.searchParams.set('end_date', endDate);
+  // Open-Meteo defaults windspeed to km/h. This function's contract (and the
+  // toKnots() helper every caller uses) is m/s, so ask for m/s explicitly
+  // rather than leaving a 3.6x discrepancy between the docs and the wire.
+  // Measured 2026-08-11 at 38.75,9.5: default 2.5 km/h == 0.71 m/s == 1.4 kn.
+  url.searchParams.set('windspeed_unit', 'ms');
   url.searchParams.set('hourly', [
     'temperature_2m',
     'precipitation',
     'windspeed_10m',
+    'winddirection_10m',
     'soil_temperature_0cm',
     'soil_temperature_6cm',
     'soil_temperature_18cm',

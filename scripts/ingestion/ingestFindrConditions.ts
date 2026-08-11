@@ -645,10 +645,22 @@ async function buildOpenMeteoMarineFallback(
 
   const windSpeedKts = firstHour.windSpeedKts ?? toKnots(firstHour.windSpeedMS);
 
-  // Phase 1: Fetch weather data (pressure, cloud cover) from OpenMeteo weather API
-  // This supplements the marine data with atmospheric conditions for European rectangles
+  // Phase 1: Fetch atmospheric data from the Open-Meteo FORECAST api.
+  //
+  // Wind has to come from here. Open-Meteo's MARINE api serves waves, swell,
+  // sea level, SST and currents -- no wind at any depth (probed 2026-08-11 at
+  // 38.75,9.5: hourly keys are time/wave_height/sea_surface_temperature). So
+  // `firstHour.windSpeedKts` above is structurally always null on this path,
+  // and every rectangle Open-Meteo covered was stored with no wind at all --
+  // 125 of 324 on 2026-08-11, all of them southern (Iberia, Med, Black Sea).
+  //
+  // The forecast call below was already being made for pressure and cloud, and
+  // already requested windspeed_10m. The value arrived and was dropped on the
+  // floor. It is now read across, along with wind direction.
   let airPressureHpa: number | null = null;
   let cloudCoverPct: number | null = null;
+  let weatherWindSpeedKts: number | null = null;
+  let weatherWindDirectionDeg: number | null = null;
 
   try {
     const startDate = start.toISOString().split('T')[0]; // YYYY-MM-DD
@@ -662,24 +674,54 @@ async function buildOpenMeteoMarineFallback(
     ) as any;
 
     if (weatherData?.hourly) {
-      const times = weatherData.hourly.time || [];
+      const times: string[] = weatherData.hourly.time || [];
       const pressures = weatherData.hourly.pressure_msl || [];
       const cloudCovers = weatherData.hourly.cloud_cover || [];
+      const windSpeeds = weatherData.hourly.windspeed_10m || [];
+      const windDirections = weatherData.hourly.winddirection_10m || [];
 
-      // Get first hour data (matching marine data first hour)
-      if (times.length > 0 && pressures.length > 0) {
-        const pressure = pressures[0];
-        if (typeof pressure === 'number' && !isNaN(pressure)) {
-          airPressureHpa = toFixedOrNull(pressure, 1);
+      // Pick the hour that matches the marine observation rather than index 0.
+      //
+      // The request uses timezone=auto, so times[] are LOCAL wall-clock strings
+      // with no offset ("2026-08-11T00:00") and index 0 is local midnight, not
+      // the hour we are describing. Reading [0] reported midnight conditions
+      // against a mid-morning capture -- measured at 38.75,9.5 on 2026-08-11,
+      // index 0 gave 0.73 m/s where the actual observation hour gave 1.62.
+      // utc_offset_seconds converts them back to real instants.
+      const offsetMs = Number(weatherData.utc_offset_seconds ?? 0) * 1000;
+      const targetMs = Date.parse(firstHour.timeISO ?? start.toISOString());
+      let idx = 0;
+      let bestDelta = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < times.length; i += 1) {
+        const localMs = Date.parse(`${times[i]}Z`); // parse as if UTC...
+        if (Number.isNaN(localMs)) continue;
+        const delta = Math.abs(localMs - offsetMs - targetMs); // ...then undo the offset
+        if (delta < bestDelta) {
+          bestDelta = delta;
+          idx = i;
         }
       }
 
-      if (times.length > 0 && cloudCovers.length > 0) {
-        const cloudCover = cloudCovers[0];
-        if (typeof cloudCover === 'number' && !isNaN(cloudCover)) {
-          cloudCoverPct = toFixedOrNull(cloudCover, 0);
-        }
-      }
+      const at = (arr: unknown[]): number | null => {
+        const v = arr[idx];
+        return typeof v === 'number' && !Number.isNaN(v) ? v : null;
+      };
+
+      const pressure = at(pressures);
+      if (pressure !== null) airPressureHpa = toFixedOrNull(pressure, 1);
+
+      const cloudCover = at(cloudCovers);
+      if (cloudCover !== null) cloudCoverPct = toFixedOrNull(cloudCover, 0);
+
+      // windspeed_unit=ms is set on the request, so toKnots (m/s -> kn) is the
+      // right conversion. Left at Open-Meteo's default of km/h this would
+      // overstate wind by 3.6x -- plausible-looking and silent, which is how
+      // this pipeline usually gets hurt.
+      const windMs = at(windSpeeds);
+      if (windMs !== null) weatherWindSpeedKts = toFixedOrNull(toKnots(windMs), 1);
+
+      const windDir = at(windDirections);
+      if (windDir !== null) weatherWindDirectionDeg = toFixedOrNull(windDir, 0);
     }
   } catch (error) {
     // Weather data is supplementary - don't fail if it's unavailable
@@ -690,8 +732,11 @@ async function buildOpenMeteoMarineFallback(
     hourlySeries,
     seaTemperatureC: toFixedOrNull(firstHour.seaTemperatureC, 2),
     waveHeightM: toFixedOrNull(firstHour.waveHeightM, 2),
-    windSpeedKts,
-    windDirectionDeg: toFixedOrNull(firstHour.windDirectionDeg, 0),
+    // Marine first, forecast second. Marine is preferred on principle -- if a
+    // future marine product ever does carry wind it is the better-matched
+    // source -- but today it never does, so the forecast value is what lands.
+    windSpeedKts: windSpeedKts ?? weatherWindSpeedKts,
+    windDirectionDeg: toFixedOrNull(firstHour.windDirectionDeg, 0) ?? weatherWindDirectionDeg,
     seaLevelMeters: toTide(firstHour.seaLevelMeters),
     airPressureHpa,
     cloudCoverPct,
