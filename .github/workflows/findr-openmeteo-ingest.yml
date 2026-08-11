@@ -39,6 +39,10 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # See findr-met-ingest.yml for why this is the whole tide fix: without
+          # it every tier of the waterfall is unreachable and tide columns stay
+          # null for every rectangle, silently.
+          WORLDTIDES_API_KEY: ${{ secrets.WORLDTIDES_API_KEY }}
           FINDR_MET_SIMPLE_PROBES: '1'
           FINDR_CONDITIONS_DELAY_MS: '350'
         run: npx tsx scripts/ingestion/ingestFindrConditions.ts
