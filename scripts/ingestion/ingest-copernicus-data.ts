@@ -206,6 +206,7 @@ interface GridCell {
  *
  * Column mapping from Copernicus snapshot → grid_conditions_latest:
  *   temperatureSurface       → surface_temperature_c
+ *   temperatureBottom        → bottom_temperature_c
  *   dissolvedOxygenSurface   → oxygen_mg_l  (mmol/m³ → mg/L)
  *   salinitySurface          → salinity_psu
  *   chlorophyllSurface       → chlorophyll_mg_m3
@@ -225,6 +226,7 @@ interface GridConditionsRow {
   cell_id: string;
   collected_at: string;
   surface_temperature_c: number | null;
+  bottom_temperature_c: number | null;
   salinity_psu: number | null;
   oxygen_mg_l: number | null;
   chlorophyll_mg_m3: number | null;
@@ -353,6 +355,7 @@ function snapshotToRow(
     cell_id: cellId,
     collected_at: new Date().toISOString(),
     surface_temperature_c: snapshot.temperatureSurface ?? null,
+    bottom_temperature_c: snapshot.temperatureBottom ?? null,
     salinity_psu: snapshot.salinitySurface ?? null,
     oxygen_mg_l: snapshot.dissolvedOxygenSurface != null
       ? snapshot.dissolvedOxygenSurface * 0.032  // mmol/m³ → mg/L (O₂ MW = 32 g/mol)
@@ -384,6 +387,7 @@ function buildNonNullUpdate(row: GridConditionsRow): Record<string, unknown> {
   update.sources = row.sources;
 
   if (row.surface_temperature_c !== null) update.surface_temperature_c = row.surface_temperature_c;
+  if (row.bottom_temperature_c !== null) update.bottom_temperature_c = row.bottom_temperature_c;
   if (row.salinity_psu !== null) update.salinity_psu = row.salinity_psu;
   if (row.oxygen_mg_l !== null) update.oxygen_mg_l = row.oxygen_mg_l;
   if (row.chlorophyll_mg_m3 !== null) update.chlorophyll_mg_m3 = row.chlorophyll_mg_m3;

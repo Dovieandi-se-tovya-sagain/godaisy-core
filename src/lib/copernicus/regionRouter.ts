@@ -10,6 +10,21 @@ export interface CopernicusDatasetConfig {
   salinity?: string;  // Separate salinity dataset (for Mediterranean)
   currents?: string;  // Separate currents dataset (for Mediterranean)
   mixedLayerDepth?: string;  // 2D physics dataset for mlotst (thermocline depth)
+  // Where sea-bed temperature comes from. It is never its own request — it rides as an
+  // extra --variable on a call already being made, so `source` says which one and
+  // `variable` says what it is called there. Asking a product for a variable it does
+  // not have fails the whole call, so this is set only where the dataset this repo
+  // actually requests was confirmed to carry it (`copernicusmarine describe`,
+  // 2026-08-11):
+  //
+  //   BAL / IBI / ARC  physics carries `bottomT`   → source: 'physics'
+  //   GLO              the split thetao product has no bottom field, but the combined
+  //                    product already fetched for mlotst carries `tob`
+  //   NWS              physics is GLO's split thetao (no bottom field) and its MLD
+  //                    product is mlotst-only — no bottom temperature available
+  //   MED / BLK        their physics dataset ids do not resolve at all (see the notes
+  //                    on those cases), so there is nothing to attach it to
+  bottomTemperature?: { source: 'physics' | 'mixedLayerDepth'; variable: 'bottomT' | 'tob' };
   biogeochemistry: string;
   planktonFunctionalTypes?: string;  // PFT dataset for phytoplankton carbon (phyc)
   zooplankton?: string;  // Plankton dataset for zooplankton carbon (zooc)
@@ -38,6 +53,7 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       return {
         physics: 'cmems_mod_bal_phy_anfc_P1D-m',
         mixedLayerDepth: 'cmems_mod_bal_phy_anfc_P1D-m', // BAL bundled physics includes mlotst
+        bottomTemperature: { source: 'physics', variable: 'bottomT' },
         biogeochemistry: 'cmems_mod_bal_bgc_anfc_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -76,6 +92,7 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       return {
         physics: 'cmems_mod_ibi_phy_anfc_0.027deg-3D_P1D-m',
         mixedLayerDepth: 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m', // IBI 3D physics may not expose mlotst; use GLO 2D
+        bottomTemperature: { source: 'physics', variable: 'bottomT' },
         biogeochemistry: 'cmems_mod_ibi_bgc_anfc_0.027deg-3D_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -90,6 +107,10 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
         physics: 'cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m', // Temperature dataset
         salinity: 'cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m', // Salinity dataset (split from physics)
         mixedLayerDepth: 'cmems_mod_nws_phy-mld_anfc_7km-2D_P1D-m', // NWS dedicated MLD product (7km)
+        // No bottomTemperature: physics here is GLO's split thetao product, which has no
+        // bottom field, and the NWS MLD product carries mlotst and nothing else. Pointing
+        // mixedLayerDepth at GLO's combined product would supply `tob` but would cost NWS
+        // its 7km regional mlotst — a separate trade, not one to smuggle in here.
         biogeochemistry: 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -104,6 +125,7 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       return {
         physics: 'cmems_mod_arc_phy_anfc_6km_detided_P1D-m',
         mixedLayerDepth: 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m', // ARC: use GLO 2D physics for mlotst
+        bottomTemperature: { source: 'physics', variable: 'bottomT' },
         biogeochemistry: 'cmems_mod_arc_bgc_anfc_ecosmo_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -118,6 +140,7 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
         physics: 'cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m', // Temperature dataset
         salinity: 'cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m', // Salinity dataset (split from physics)
         mixedLayerDepth: 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m', // GLO 2D physics for mlotst (no depth dimension)
+        bottomTemperature: { source: 'mixedLayerDepth', variable: 'tob' }, // split thetao product has no bottom field
         biogeochemistry: 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -150,6 +173,7 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
     return {
       physics: 'cmems_mod_bal_phy_anfc_P1D-m',
       mixedLayerDepth: 'cmems_mod_bal_phy_anfc_P1D-m',
+      bottomTemperature: { source: 'physics', variable: 'bottomT' },
       biogeochemistry: 'cmems_mod_bal_bgc_anfc_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -252,6 +276,7 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
     return {
       physics: 'cmems_mod_ibi_phy_anfc_0.027deg-3D_P1D-m',
       mixedLayerDepth: 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m',
+      bottomTemperature: { source: 'physics', variable: 'bottomT' },
       biogeochemistry: 'cmems_mod_ibi_bgc_anfc_0.027deg-3D_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -309,6 +334,7 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
     return {
       physics: 'cmems_mod_arc_phy_anfc_6km_detided_P1D-m',
       mixedLayerDepth: 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m',
+      bottomTemperature: { source: 'physics', variable: 'bottomT' },
       biogeochemistry: 'cmems_mod_arc_bgc_anfc_ecosmo_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',

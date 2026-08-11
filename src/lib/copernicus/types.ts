@@ -9,6 +9,7 @@ export interface CopernicusRecordVariables {
   mlotst?: number; // ocean mixed layer thickness (m) - THERMOCLINE DEPTH
   zos?: number; // sea surface height above geoid (m) - UPWELLING INDICATOR
   bottomT?: number; // sea water potential temperature at sea floor (°C)
+  tob?: number; // same field, as the GLO combined product names it
   
   // Biogeochemical variables
   o2?: number; // dissolved oxygen (mmol/m³)
@@ -76,6 +77,12 @@ export interface CopernicusMarineSnapshot {
   
   // Surface measurements
   temperatureSurface?: number;
+  // Sea-bed temperature. Demersal species live at the bottom, so in a stratified
+  // summer water column the surface reading says nothing about the water they
+  // actually occupy — off the Cantabrian coast on 2026-08-06 the surface was
+  // 21.5 C while the bottom was 13.1 C, the difference between "far too warm for
+  // hake" and "squarely in its 8-16 C optimum".
+  temperatureBottom?: number;
   salinitySurface?: number;
   dissolvedOxygenSurface?: number;
   chlorophyllSurface?: number;

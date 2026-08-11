@@ -300,6 +300,21 @@ export class RealCopernicusProvider implements CopernicusProvider {
       const temperatureDataset = this.datasetConfig?.physics || 'cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m';
       const salinityDataset = this.datasetConfig?.salinity || 'cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m';
       const currentsDataset = this.datasetConfig?.currents || 'cmems_mod_glo_phy-cur_anfc_0.083deg_P1D-m';
+      // Sea-bed temperature. Demersal species live at the bottom, so in a stratified
+      // summer column the surface reading is not the water they occupy. This is always
+      // requested as an extra variable on a call we already make, never as its own
+      // fetch — which product carries it, and under which name, is routed per region
+      // (see `bottomTemperature` in regionRouter). Requesting it from a product that
+      // lacks it fails that whole call, so regions where it was not confirmed present
+      // leave the config unset and simply keep the variable lists they had.
+      const bottomTemp = this.datasetConfig?.bottomTemperature;
+      const temperatureVariables = bottomTemp?.source === 'physics'
+        ? ['thetao', bottomTemp.variable]
+        : ['thetao'];
+      const mldVariables = bottomTemp?.source === 'mixedLayerDepth'
+        ? ['mlotst', bottomTemp.variable]
+        : ['mlotst'];
+
       const bioDataset = this.datasetConfig?.biogeochemistry || 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m';
       // Pass [] to let CMEMS return all variables the dataset has.
       // Global bgc-bio only has o2+nppv; nutrients (no3,po4,si,fe) are in bgc-nut,
@@ -380,7 +395,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
           try {
             temperatureData = await this.fetchAndParse(
               temperatureDataset,
-              ['thetao'],
+              temperatureVariables,  // thetao, plus `bottomT` where the product carries it
               lat, lon,
               fallbackDateStr, fallbackDateStr,
               padding
@@ -483,7 +498,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
           try {
             mldData = await this.fetchAndParse(
               mldDataset,
-              ['mlotst'],
+              mldVariables,  // mlotst, plus `tob` for GLO (see bottomTemp above)
               lat, lon,
               mldDateStr, mldDateStr,
               padding
