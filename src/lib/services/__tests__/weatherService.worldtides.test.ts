@@ -25,6 +25,36 @@ jest.mock('../../monitoring/weatherMetrics', () => ({
   },
 }));
 
+// Mock the Supabase tide cache.
+//
+// These tests were written before fetchWorldTides gained a cache layer (marked
+// "PHASE 2.1" in weatherService.ts). They mocked fetch and weatherMetrics, but
+// the function now calls getSupabaseServerClient() and reads tide_cache before
+// it ever reaches the API. Unmocked, that call throws and the function returns
+// null -- which is why all 34 assertions failed the first time this suite was
+// ever run.
+//
+// The cache always misses here, which is what these tests need: every one of
+// them is about the WorldTides API interaction -- URL shape, headers, error
+// handling, coordinate handling, response structure -- and a cache hit would
+// short-circuit the very code path under test. The write is absorbed.
+//
+// Cache-hit behaviour is genuinely untested as a result. That is a real gap,
+// but it is a missing test rather than a broken one, and inventing coverage
+// here would misrepresent what this suite checks.
+jest.mock('../../supabase/serverClient', () => {
+  const builder: Record<string, unknown> = {};
+  for (const method of ['select', 'eq', 'gte', 'order', 'limit']) {
+    builder[method] = jest.fn(() => builder);
+  }
+  builder.maybeSingle = jest.fn(async () => ({ data: null, error: null }));
+  builder.upsert = jest.fn(async () => ({ error: null }));
+
+  return {
+    getSupabaseServerClient: jest.fn(() => ({ from: jest.fn(() => builder) })),
+  };
+});
+
 // Sample WorldTides response
 const mockWorldTidesResponse = {
   status: 200,
