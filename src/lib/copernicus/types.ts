@@ -8,7 +8,12 @@ export interface CopernicusRecordVariables {
   vo?: number; // northward sea water velocity (m/s) - OCEAN CURRENTS
   mlotst?: number; // ocean mixed layer thickness (m) - THERMOCLINE DEPTH
   zos?: number; // sea surface height above geoid (m) - UPWELLING INDICATOR
-  bottomT?: number; // sea water potential temperature at sea floor (°C)
+  // Sea-bed temperature. The KEY IS LOWER CASE: copernicus-worker.py normalises every
+  // NetCDF variable name through var.lower() before it reaches TypeScript, so CMEMS's
+  // `bottomT` arrives as `bottomt`. Declaring the CMEMS spelling here would document a
+  // property that is always undefined.
+  bottomt?: number; // regional physics products (CMEMS spells it bottomT)
+  tob?: number;     // the GLO combined product's name for the same field
   
   // Biogeochemical variables
   o2?: number; // dissolved oxygen (mmol/m³)
@@ -76,6 +81,12 @@ export interface CopernicusMarineSnapshot {
   
   // Surface measurements
   temperatureSurface?: number;
+  // Sea-bed temperature. Demersal species live at the bottom, so in a stratified
+  // summer water column the surface reading says nothing about the water they
+  // actually occupy — off the Cantabrian coast on 2026-08-06 the surface was
+  // 21.5 C while the bottom was 13.1 C, the difference between "far too warm for
+  // hake" and "squarely in its 8-16 C optimum".
+  temperatureBottom?: number;
   salinitySurface?: number;
   dissolvedOxygenSurface?: number;
   chlorophyllSurface?: number;
