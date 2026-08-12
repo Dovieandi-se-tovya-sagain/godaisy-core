@@ -85,6 +85,28 @@ describe('MLD fallback when a dataset lacks the bottom-temperature variable', ()
     expect(mldCalls(calls).filter(c => c.variables.includes('tob'))).toHaveLength(1);
   });
 
+  it('drops bottomT rather than losing surface temperature', async () => {
+    // The higher-stakes twin of the MLD case. MED and BLK route bottom temperature onto the PHYSICS
+    // call, which also carries thetao — the variable the dominant scoring term is built on. A
+    // product without bottomT must cost us the extra, never the temperature for 1,470 cells.
+    const { provider, calls } = stubProvider('MED', 'bottomT');
+    await provider.fetchBundle(at);
+
+    const tempCalls = calls.filter(c => c.variables.includes('thetao'));
+    expect(tempCalls.length).toBeGreaterThanOrEqual(2);
+    expect(tempCalls[0].variables).toContain('bottomT');   // the attempt that fails
+    expect(tempCalls[1].variables).toEqual(['thetao']);    // narrowed, and it succeeds
+    // Asked for exactly once: narrowing is held outside the padding and date loops.
+    expect(tempCalls.filter(c => c.variables.includes('bottomT'))).toHaveLength(1);
+  });
+
+  it.each(['MED', 'BLK'])('%s routes bottom temperature on its bundled physics', async (region) => {
+    const { provider, calls } = stubProvider(region, null);
+    await provider.fetchBundle(at);
+    const tempCalls = calls.filter(c => c.variables.includes('thetao'));
+    expect(tempCalls[0].variables).toEqual(expect.arrayContaining(['thetao', 'bottomT']));
+  });
+
   it('leaves an unrelated failure to the ordinary retry path', async () => {
     const provider = new RealCopernicusProvider('NWS');
     const calls: Call[] = [];
