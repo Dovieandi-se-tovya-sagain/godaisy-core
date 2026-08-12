@@ -112,11 +112,29 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       return {
         physics: 'cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m', // Temperature dataset
         salinity: 'cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m', // Salinity dataset (split from physics)
-        mixedLayerDepth: 'cmems_mod_nws_phy-mld_anfc_7km-2D_P1D-m', // NWS dedicated MLD product (7km)
-        // No bottomTemperature: physics here is GLO's split thetao product, which has no
-        // bottom field, and the NWS MLD product carries mlotst and nothing else. Pointing
-        // mixedLayerDepth at GLO's combined product would supply `tob` but would cost NWS
-        // its 7km regional mlotst — a separate trade, not one to smuggle in here.
+        // GLO's combined 2D physics, not the NWS 7km MLD product. This is the trade the comment
+        // that stood here declined to make — now made deliberately, with the measurement it was
+        // waiting for.
+        //
+        // The constraint it described is real: bottom temperature rides along on a call we already
+        // make, and asking a product for a variable it lacks fails that whole call. NWS's physics is
+        // GLO's split thetao (no bottom field) and the NWS 7km MLD product carries mlotst and
+        // nothing else, so between those two datasets there is nowhere to put `tob`. Only swapping
+        // one of them changes that.
+        //
+        // What settles it is what each field is worth. Measured against production 2026-08-12:
+        // NEITHER prediction engine reads mixed layer depth — `mlotst` and `mixed_layer_depth_m`
+        // appear nowhere in get_fishing_confidence_v3 or get_global_fishing_predictions — while
+        // get_global_fishing_predictions DOES read bottom_temperature_c, and it is the engine that
+        // serves these cells. MLD survives only in the conditions dashboard, as display.
+        //
+        // Cost: MLD resolution on a field nothing scores, 7km to GLO's 0.083° (~9km).
+        // Gain: bottom temperature across all 800 NWS cells, which read 0/800 before this against
+        // BAL's 640/707, and which the 43 species carrying surface_temp_applies = false need before
+        // they can score temperature at all rather than abstaining. The UK shelf is not a marginal
+        // place to be missing demersal temperature.
+        mixedLayerDepth: 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m',
+        bottomTemperature: { source: 'mixedLayerDepth', variable: 'tob' },
         biogeochemistry: 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
