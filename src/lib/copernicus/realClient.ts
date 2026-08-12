@@ -321,6 +321,11 @@ export class RealCopernicusProvider implements CopernicusProvider {
       const temperatureVariables = bottomTemp?.source === 'physics'
         ? ['thetao', bottomTemp.variable]
         : ['thetao'];
+      // Narrowed to ['thetao'] if the physics product turns out not to carry the bottom-temperature
+      // variable. Same protection as the MLD path below, and it matters more here: temperature is
+      // the term the whole score is built on, so losing a physics call to a variable we merely
+      // hoped for would be the single most damaging silent failure in this pipeline.
+      let tempVarsInUse = temperatureVariables;
       const mldVariables = bottomTemp?.source === 'mixedLayerDepth'
         ? ['mlotst', bottomTemp.variable]
         : ['mlotst'];
@@ -405,7 +410,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
           try {
             temperatureData = await this.fetchAndParse(
               temperatureDataset,
-              temperatureVariables,  // thetao, plus `bottomT` where the product carries it
+              tempVarsInUse,  // thetao, plus `bottomT` where the product carries it
               lat, lon,
               fallbackDateStr, fallbackDateStr,
               padding
@@ -419,6 +424,37 @@ export class RealCopernicusProvider implements CopernicusProvider {
             }
             temperatureData = null;
           } catch (err) {
+            // Surface temperature must never be lost to a bottom-temperature variable the product
+            // does not have. thetao drives the dominant scoring term; `bottomT` is an extra we ask
+            // for on the same call. If the product rejects the extra, drop it and keep the reading
+            // that matters, rather than failing the cell.
+            if (err instanceof Error &&
+                err.message.startsWith('VARIABLE_NOT_FOUND:') &&
+                tempVarsInUse.length > 1) {
+              const dropped = tempVarsInUse.slice(1).join(', ');
+              console.warn(`   ⚠️  ${temperatureDataset} has no '${dropped}' — retrying temperature without it`);
+              tempVarsInUse = ['thetao'];
+              try {
+                temperatureData = await this.fetchAndParse(
+                  temperatureDataset,
+                  tempVarsInUse,
+                  lat, lon,
+                  fallbackDateStr, fallbackDateStr,
+                  padding
+                );
+                if (temperatureData && this.hasValidData(temperatureData)) {
+                  daysBack = dayOffset;
+                  successfulDate = fallbackDateStr;
+                  const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
+                  console.log(`   ✅ Temperature found without '${dropped}' at ${padding}° padding${ageNote}`);
+                  break;
+                }
+                temperatureData = null;
+              } catch {
+                // Narrowed request failed too; remaining paddings and dates use the shorter list.
+              }
+              continue;
+            }
             const isTimeout = err instanceof Error && err.message.includes('timeout');
             const errorType = isTimeout ? '⏱️  Timeout' : '❌ Error';
             const isLastAttempt = dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1] &&

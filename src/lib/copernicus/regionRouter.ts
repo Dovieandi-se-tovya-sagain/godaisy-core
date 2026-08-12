@@ -72,6 +72,17 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       return {
         physics: 'cmems_mod_med_phy_anfc_4.2km_P1D-m', // Fixed: was 0.042deg-3D, now 4.2km
         mixedLayerDepth: 'cmems_mod_med_phy-mld_anfc_4.2km_P1D-m', // MED dedicated MLD product
+        // Routed 2026-08-12. MED had no bottomTemperature entry, so it never asked — the same hole
+        // NWS had, found while auditing why MED sat at 10.7% when BAL reads 90.5%. That 10.7% is
+        // cumulative residue from an earlier configuration, not current ingestion: a null never
+        // overwrites a stored value.
+        //
+        // Sourced from `physics` because this is the BUNDLED MED product, the same shape as BAL's
+        // bundled physics that yields 90.5%, rather than one of the -tem/-sal splits. If it turns
+        // out not to carry bottomT, realClient now drops the variable and keeps thetao rather than
+        // failing the call — without that guard this change would have risked surface temperature
+        // for 1,470 cells, a far worse trade than the one it is trying to win.
+        bottomTemperature: { source: 'physics', variable: 'bottomT' },
         biogeochemistry: 'cmems_mod_med_bgc-bio_anfc_4.2km_P1D-m', // Fixed: added -bio suffix, changed resolution
         planktonFunctionalTypes: 'cmems_mod_med_bgc-pft_anfc_4.2km_P1D-m', // Med has its own PFT product
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -86,6 +97,9 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       return {
         physics: 'cmems_mod_blk_phy_anfc_2.5km_P1D-m',
         mixedLayerDepth: 'cmems_mod_blk_phy_anfc_2.5km_P1D-m', // BLK bundled physics includes mlotst
+        // Routed 2026-08-12 alongside MED, which had the same gap. Bundled product — its own
+        // mixedLayerDepth comment says so — so bottomT belongs on the physics call.
+        bottomTemperature: { source: 'physics', variable: 'bottomT' },
         biogeochemistry: 'cmems_mod_blk_bgc_anfc_2.5km_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
