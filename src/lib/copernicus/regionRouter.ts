@@ -108,7 +108,11 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
         coverage: 'IBI_ANALYSIS_FORECAST',
       };
     case 'NWS':
-      // NWS has no analysis/forecast product, use GLO with split datasets
+      // NWS has no analysis/forecast product, so this borrows GLO: the SPLIT products for
+      // temperature and salinity, and the COMBINED 2D physics for mixed layer depth. The mix is
+      // deliberate — the combined product is the only one carrying `tob`, and pointing
+      // mixedLayerDepth anywhere else takes bottom temperature back to zero for all 800 cells.
+      // See the note on mixedLayerDepth below before changing either.
       return {
         physics: 'cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m', // Temperature dataset
         salinity: 'cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m', // Salinity dataset (split from physics)
@@ -159,7 +163,11 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
         coverage: 'ARCTIC_ANALYSIS_FORECAST',
       };
     case 'GLO':
-      // Global Ocean uses split datasets for temperature and salinity
+      // Global Ocean uses the SPLIT products for temperature and salinity, and the COMBINED 2D
+      // physics for mixed layer depth. That last one is not interchangeable with the split
+      // products: it is the only one carrying `tob`, which is where GLO's bottom temperature comes
+      // from. This is also the majority path — getProvider passes no region for GLO_AM/AP/AF, so
+      // realClient falls back to these same datasets for 3,568 of the 7,649 cells.
       return {
         physics: 'cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m', // Temperature dataset
         salinity: 'cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m', // Salinity dataset (split from physics)
