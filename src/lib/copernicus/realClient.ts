@@ -497,6 +497,10 @@ export class RealCopernicusProvider implements CopernicusProvider {
       // Try mixed layer depth (mlotst) - 2D variable from separate physics dataset
       // MLD is stable over days (like BGC), so use stableDateFallbacks
       const mldDataset = this.datasetConfig?.mixedLayerDepth || 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m';
+      // Narrowed to ['mlotst'] the first time a dataset rejects the bottom-temperature variable.
+      // Held outside both loops so that discovery is made once per cell, rather than re-attempting
+      // a request already known to be impossible on every remaining padding and date.
+      let mldVarsInUse = mldVariables;
       for (const dayOffset of stableDateFallbacks) {
         if (mldData) break;
 
@@ -508,7 +512,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
           try {
             mldData = await this.fetchAndParse(
               mldDataset,
-              mldVariables,  // mlotst, plus `tob` for GLO (see bottomTemp above)
+              mldVarsInUse,  // mlotst, plus `tob` where a region routes bottom temperature here
               lat, lon,
               mldDateStr, mldDateStr,
               padding
@@ -520,6 +524,45 @@ export class RealCopernicusProvider implements CopernicusProvider {
             }
             mldData = null;
           } catch (err) {
+            // A dataset that does not carry the bottom-temperature variable must not cost us the
+            // mixed layer depth as well.
+            //
+            // Both ride in ONE call, and copernicusmarine fails the entire subset when any requested
+            // variable is absent. So before this branch, routing bottom temperature at a product
+            // that turned out to lack `tob` would have taken MLD down with it — silently: every
+            // error here is swallowed, no truth-check watches MLD, and it feeds only a display card.
+            // NWS would have gone from 703 of 800 cells to zero with nothing to say so.
+            //
+            // The evidence says it should not fire: GLO_AP/AM/AF issue this exact call and return
+            // MLD for 3,582 of 3,582 coastal cells, which is impossible if `tob` is missing from
+            // the product. It exists because the cost of being wrong is asymmetric — dropping the
+            // new variable loses nothing we had, dropping the call loses something we did.
+            if (err instanceof Error &&
+                err.message.startsWith('VARIABLE_NOT_FOUND:') &&
+                mldVarsInUse.length > 1) {
+              const dropped = mldVarsInUse.slice(1).join(', ');
+              console.warn(`   ⚠️  ${mldDataset} has no '${dropped}' — retrying MLD without it`);
+              mldVarsInUse = ['mlotst'];
+              try {
+                mldData = await this.fetchAndParse(
+                  mldDataset,
+                  mldVarsInUse,
+                  lat, lon,
+                  mldDateStr, mldDateStr,
+                  padding
+                );
+                if (mldData && this.hasValidData(mldData)) {
+                  const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
+                  console.log(`   ✅ MLD found without '${dropped}' at ${padding}° padding${ageNote}`);
+                  break;
+                }
+                mldData = null;
+              } catch {
+                // The narrowed request failed too. Remaining paddings and dates now use the shorter
+                // list, so this cell falls back to the ordinary retry path.
+              }
+              continue;
+            }
             const isLastAttempt = dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1] &&
                                  padding === paddings[paddings.length - 1];
             if (isLastAttempt) {
