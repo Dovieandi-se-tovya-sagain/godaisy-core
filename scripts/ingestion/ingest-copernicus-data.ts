@@ -55,6 +55,7 @@ import { MockCopernicusProvider } from '../../src/lib/copernicus/mockClient';
 import { RealCopernicusProvider, shutdownCopernicusWorker } from '../../src/lib/copernicus/realClient';
 import { toCopernicusMarineData } from '../../src/lib/copernicus/transformers';
 import type { CopernicusMarineSnapshot } from '../../src/lib/copernicus/types';
+import { cmemsRegionFromCoords } from '../../src/lib/copernicus/cmemsRegion';
 
 // Load environment variables
 config({ path: resolve(process.cwd(), '.env.local') });
@@ -161,17 +162,15 @@ function getCmemsRegion(region: string, lat: number, lon: number): string {
     lat > 66
   ) return 'ARC';
 
-  // Geographic bounds fallback
-  if (lat >= 30 && lat <= 46 && lon >= -6 && lon <= 36) return 'MED';
-  if (lat >= 53 && lat <= 66 && lon >= 10 && lon <= 30) return 'BAL';
-  if (lat >= 48 && lat <= 63 && lon >= -12 && lon <= 13) return 'NWS';
-  if (lat >= 36 && lat <= 54 && lon >= -20 && lon <= -5) return 'IBI';
-
-  // Split GLOBAL into sub-regions for parallel CI jobs
-  // All use the GLOBAL Copernicus model, but split by longitude for scheduling
-  if (lon <= -30) return 'GLO_AM';   // Americas (~6,600 cells)
-  if (lon >= 90) return 'GLO_AP';    // Asia-Pacific (~6,900 cells)
-  return 'GLO_AF';                   // Africa, Middle East, Indian Ocean (~3,000 cells)
+  // Geographic bounds fallback — shared, and the ONLY half of this function that runs for grid
+  // cells: the single caller that matters passes the name as an empty string
+  // (`getCmemsRegion('', lat, lon)` below), so every name branch above is dead in that path.
+  //
+  // It lives in src/lib/copernicus/cmemsRegion.ts because it was copied into three scripts and
+  // they drifted: this copy had no Black Sea box at all, so no grid cell was ever classified
+  // BLK and the workflow's BLK matrix job processed zero cells twice daily. See that file for
+  // why BLK is tested before MED and why its bounds are tighter than the basin.
+  return cmemsRegionFromCoords(lat, lon);
 }
 
 // Use real Copernicus client when credentials are available
