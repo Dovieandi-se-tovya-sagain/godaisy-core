@@ -271,6 +271,10 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
       // See getDatasetForCmemsRegion's 'MED' case: the old bundled id was retired by CMEMS.
       physics: 'cmems_mod_med_phy-tem_anfc_4.2km_P1D-m',
       mixedLayerDepth: 'cmems_mod_med_phy-mld_anfc_4.2km_P1D-m',
+      // Added 2026-08-14 (Copilot review, PR #93): this fallback path never requested bottomT
+      // even after the physics id above was fixed to carry it. Same routing as
+      // getDatasetForCmemsRegion('MED') for consistency.
+      bottomTemperature: { source: 'physics', variable: 'bottomT' },
       biogeochemistry: 'cmems_mod_med_bgc-bio_anfc_4.2km_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_med_bgc-pft_anfc_4.2km_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -298,6 +302,8 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
       // Note BLK's split temperature dataset is "-temp", not "-tem" like MED's.
       physics: 'cmems_mod_blk_phy-temp_anfc_2.5km_P1D-m',
       mixedLayerDepth: 'cmems_mod_blk_phy-mld_anfc_2.5km_P1D-m',
+      // Added 2026-08-14 (Copilot review, PR #93): same gap as MED's case above.
+      bottomTemperature: { source: 'physics', variable: 'bottomT' },
       biogeochemistry: 'cmems_mod_blk_bgc_anfc_2.5km_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
