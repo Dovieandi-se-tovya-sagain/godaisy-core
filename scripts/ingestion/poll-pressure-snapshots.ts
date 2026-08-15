@@ -131,14 +131,14 @@ async function getActiveRectangles(): Promise<Array<{ code: string; lat: number;
     .select('rectangle_code, center_lat, center_lon')
     .limit(150); // Limit to top 150 rectangles
 
+  // Same reasoning as insertPressureSnapshots: an empty return here is
+  // indistinguishable from "nothing to do", and main() treats that as success.
   if (error) {
-    console.error('❌ Error fetching rectangles:', error);
-    return [];
+    throw new Error(`could not read ices_rectangles: ${error.message}`);
   }
 
   if (!rectangles || rectangles.length === 0) {
-    console.error('❌ No rectangles found in database');
-    return [];
+    throw new Error('ices_rectangles returned no rows — cannot poll anything');
   }
 
   // Deduplicate by rounded coordinates (since MET API calls will be rounded anyway)
@@ -170,7 +170,7 @@ async function insertPressureSnapshots(snapshots: PressureSnapshot[]): Promise<n
     return 0;
   }
 
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('pressure_snapshots')
     .upsert(
       snapshots,
@@ -180,9 +180,11 @@ async function insertPressureSnapshots(snapshots: PressureSnapshot[]): Promise<n
       }
     );
 
+  // Throw rather than return 0. Swallowing this is how the missing
+  // pressure_snapshots table went unnoticed for ~3.5 months: every rectangle
+  // logged "Inserted 0 snapshots" next to a tick and the job exited 0.
   if (error) {
-    console.error('❌ Error inserting pressure snapshots:', error);
-    return 0;
+    throw new Error(`upsert into pressure_snapshots failed: ${error.message}`);
   }
 
   return snapshots.length;
@@ -238,11 +240,28 @@ async function pollPressureSnapshots() {
   }
 
   console.log('\n=====================================');
-  console.log('✅ Pressure Polling Complete!');
   console.log(`   Rectangles processed: ${rectangles.length}`);
   console.log(`   Successful: ${successCount}`);
   console.log(`   Failed: ${failCount}`);
   console.log(`   Total snapshots inserted: ${totalSnapshots}`);
+
+  // A run that stored nothing is a failed run, however cleanly each rectangle
+  // reported. Exiting 0 here is what hid a missing table for ~3.5 months.
+  // Isolated rectangle failures are tolerated -- MET Norway drops a point
+  // occasionally -- but a majority failing means the feed is down, not flaky.
+  if (totalSnapshots === 0) {
+    console.error('💥 Stored 0 snapshots across all rectangles — treating as failure.');
+    process.exitCode = 1;
+    return;
+  }
+
+  if (failCount > rectangles.length / 2) {
+    console.error(`💥 ${failCount} of ${rectangles.length} rectangles failed — treating as failure.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log('✅ Pressure Polling Complete!');
 }
 
 // Run the polling script
