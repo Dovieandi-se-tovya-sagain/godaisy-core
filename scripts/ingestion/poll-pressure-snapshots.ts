@@ -126,10 +126,15 @@ async function fetchPressureData(
 async function getActiveRectangles(): Promise<Array<{ code: string; lat: number; lon: number }>> {
   // Simple approach: Get all ICES rectangles and poll them
   // Since we're rounding coordinates, we'll deduplicate by rounded coords
+  // No limit, and an explicit order. The previous `.limit(150)` had no ORDER BY,
+  // so it took an arbitrary 150 of the 299 rows in ices_rectangles -- 129 after
+  // dedup, leaving 170 rectangles with no pressure data at all, and free to
+  // return a DIFFERENT 150 after any update or vacuum. Coverage was neither
+  // complete nor stable, and nothing reported it.
   const { data: rectangles, error } = await supabase
     .from('ices_rectangles')
     .select('rectangle_code, center_lat, center_lon')
-    .limit(150); // Limit to top 150 rectangles
+    .order('rectangle_code');
 
   // Same reasoning as insertPressureSnapshots: an empty return here is
   // indistinguishable from "nothing to do", and main() treats that as success.
@@ -170,7 +175,11 @@ async function insertPressureSnapshots(snapshots: PressureSnapshot[]): Promise<n
     return 0;
   }
 
-  const { error } = await supabase
+  // `.select()` matters: ON CONFLICT DO NOTHING ... RETURNING yields only the
+  // rows actually inserted, so this returns rows WRITTEN rather than rows
+  // SUBMITTED. Returning snapshots.length instead would report 3,096 on a run
+  // that stored nothing because every row was a duplicate.
+  const { data, error } = await supabase
     .from('pressure_snapshots')
     .upsert(
       snapshots,
@@ -178,7 +187,8 @@ async function insertPressureSnapshots(snapshots: PressureSnapshot[]): Promise<n
         onConflict: 'lat_rounded,lon_rounded,captured_at',
         ignoreDuplicates: true,
       }
-    );
+    )
+    .select('id');
 
   // Throw rather than return 0. Swallowing this is how the missing
   // pressure_snapshots table went unnoticed for ~3.5 months: every rectangle
@@ -187,7 +197,7 @@ async function insertPressureSnapshots(snapshots: PressureSnapshot[]): Promise<n
     throw new Error(`upsert into pressure_snapshots failed: ${error.message}`);
   }
 
-  return snapshots.length;
+  return data?.length ?? 0;
 }
 
 /**
@@ -202,14 +212,22 @@ async function pollPressureSnapshots() {
   const rectangles = await getActiveRectangles();
   console.log(`   Found ${rectangles.length} active rectangles\n`);
 
+  // Unreachable in practice -- getActiveRectangles throws on both the error and
+  // empty-result paths, and the dedup loop always emits at least one entry for a
+  // non-empty input. Kept as a throw rather than a `return`, so that if a future
+  // change reinstates a soft empty return upstream it fails loudly instead of
+  // silently resurrecting the exit-0-on-total-failure bug this file already had.
   if (rectangles.length === 0) {
-    console.log('ℹ️  No active rectangles found. Exiting.');
-    return;
+    throw new Error('no rectangles to poll after deduplication');
   }
 
-  let totalSnapshots = 0;
+  let submittedCount = 0;   // rows sent to the upsert
+  let writtenCount = 0;     // rows the upsert actually inserted
   let successCount = 0;
   let failCount = 0;
+  // Furthest-ahead forecast time seen from MET across all rectangles. Used to
+  // detect a frozen upstream: see the horizon check after the loop.
+  let maxHorizon: number | null = null;
 
   // Process each rectangle with rate limiting (MET Norway recommends 20 req/sec max)
   for (let i = 0; i < rectangles.length; i++) {
@@ -221,11 +239,18 @@ async function pollPressureSnapshots() {
       const snapshots = await fetchPressureData(rect.lat, rect.lon, rect.code);
 
       if (snapshots.length > 0) {
+        // Track how far ahead MET's forecast reaches, before storing.
+        for (const s of snapshots) {
+          const t = Date.parse(s.captured_at);
+          if (!Number.isNaN(t) && (maxHorizon === null || t > maxHorizon)) maxHorizon = t;
+        }
+
         // Insert into database
         const inserted = await insertPressureSnapshots(snapshots);
-        totalSnapshots += inserted;
+        submittedCount += snapshots.length;
+        writtenCount += inserted;
         successCount++;
-        console.log(`   ✅ Inserted ${inserted} snapshots`);
+        console.log(`   ✅ Stored ${inserted} new of ${snapshots.length} submitted`);
       } else {
         failCount++;
         console.log(`   ⚠️  No pressure data available`);
@@ -239,29 +264,84 @@ async function pollPressureSnapshots() {
     }
   }
 
+  const horizonHours = maxHorizon === null
+    ? 0
+    : (maxHorizon - Date.now()) / 3_600_000;
+
   console.log('\n=====================================');
   console.log(`   Rectangles processed: ${rectangles.length}`);
   console.log(`   Successful: ${successCount}`);
   console.log(`   Failed: ${failCount}`);
-  console.log(`   Total snapshots inserted: ${totalSnapshots}`);
+  console.log(`   Snapshots submitted: ${submittedCount}`);
+  console.log(`   Snapshots newly stored: ${writtenCount}`);
+  console.log(`   Forecast horizon: ${horizonHours.toFixed(1)}h ahead`);
 
-  // A run that stored nothing is a failed run, however cleanly each rectangle
-  // reported. Exiting 0 here is what hid a missing table for ~3.5 months.
-  // Isolated rectangle failures are tolerated -- MET Norway drops a point
-  // occasionally -- but a majority failing means the feed is down, not flaky.
-  if (totalSnapshots === 0) {
-    console.error('💥 Stored 0 snapshots across all rectangles — treating as failure.');
+  // Nothing fetched at all. Exiting 0 here is what hid a missing table for
+  // ~3.5 months.
+  if (submittedCount === 0) {
+    console.error('💥 Fetched 0 snapshots across all rectangles — treating as failure.');
     process.exitCode = 1;
     return;
   }
 
-  if (failCount > rectangles.length / 2) {
-    console.error(`💥 ${failCount} of ${rectangles.length} rectangles failed — treating as failure.`);
+  // Isolated failures are tolerated -- MET Norway drops a point occasionally --
+  // but the measured baseline is 0 failures in 129, twice consecutively, so a
+  // rate this high is an outage rather than flakiness. Previously this was
+  // `> length / 2`, which let exactly half the feed go dark and still exit 0.
+  const failRate = failCount / rectangles.length;
+  if (failRate > 0.1) {
+    console.error(`💥 ${failCount} of ${rectangles.length} rectangles failed (${(failRate * 100).toFixed(0)}%) — treating as failure.`);
     process.exitCode = 1;
     return;
   }
+
+  // A frozen upstream is invisible to the counts above: if MET serves an
+  // unchanged window forever, every row is a duplicate, writtenCount is 0 and
+  // submittedCount is healthy. Asserting on the forecast horizon catches it at
+  // source. `writtenCount === 0` is NOT itself an error -- a re-run inside the
+  // same hour legitimately stores nothing -- so the horizon is the real signal.
+  const MIN_HORIZON_HOURS = 12;
+  if (horizonHours < MIN_HORIZON_HOURS) {
+    console.error(`💥 MET forecast reaches only ${horizonHours.toFixed(1)}h ahead (expected >= ${MIN_HORIZON_HOURS}h) — upstream looks frozen or stale.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (writtenCount === 0) {
+    console.warn('⚠️  No new rows stored — every snapshot was already present. Expected only for a re-run inside the same hour.');
+  }
+
+  await pruneOldSnapshots();
 
   console.log('✅ Pressure Polling Complete!');
+}
+
+/**
+ * Drop snapshots older than the retention window.
+ *
+ * Trends need at most a 6h lookback; 7 days is generous margin. Without this the
+ * table grows without bound -- roughly 129 points x 3 genuinely-new hours x 8
+ * runs/day, on the order of 10^6 rows/year, none of it read after 6 hours.
+ * Uses pressure_snapshots_captured_at_idx.
+ *
+ * A prune failure must not fail the run: the data is already stored and correct,
+ * and a green feed matters more than a tidy one.
+ */
+async function pruneOldSnapshots(): Promise<void> {
+  const cutoff = new Date(Date.now() - 7 * 24 * 3_600_000).toISOString();
+
+  const { data, error } = await supabase
+    .from('pressure_snapshots')
+    .delete()
+    .lt('captured_at', cutoff)
+    .select('id');
+
+  if (error) {
+    console.warn(`⚠️  Retention prune failed (non-fatal): ${error.message}`);
+    return;
+  }
+
+  console.log(`   Pruned ${data?.length ?? 0} snapshots older than ${cutoff}`);
 }
 
 // Run the polling script
