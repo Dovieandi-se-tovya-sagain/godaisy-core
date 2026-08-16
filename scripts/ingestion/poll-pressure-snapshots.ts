@@ -313,6 +313,32 @@ async function pollPressureSnapshots() {
 
   await pruneOldSnapshots();
 
+  // Derive the 3h/6h tendency the notification verdicts actually read. Storing
+  // the time series is only half the chain: findr's check-notifications.ts reads
+  // findr_conditions_snapshots.pressure_trend_category, and nothing computed it
+  // until 20260816103000, so every verdict claimed a steady barometer.
+  //
+  // Deliberately AFTER the prune, so the trend is computed from the retained
+  // window. The updated rows reach the consumer when findr_conditions_latest is
+  // next refreshed (its own workflow, every 30 min) -- so a trend is at most
+  // ~30 min behind this run, against a 3-hourly cadence.
+  const { data: trendRows, error: trendError } = await supabase
+    .rpc('update_pressure_trends');
+
+  if (trendError) {
+    // Snapshots are already stored and correct, so this is not a lost run --
+    // but the trend is the reason the feed exists, so it must not pass silently.
+    console.error(`💥 Pressure trend computation failed: ${trendError.message}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(`   Pressure trends updated: ${trendRows ?? 0} rectangles`);
+
+  if (!trendRows) {
+    console.warn('⚠️  0 rectangles got a trend — expected only before 3h of history exists for any point.');
+  }
+
   console.log('✅ Pressure Polling Complete!');
 }
 
