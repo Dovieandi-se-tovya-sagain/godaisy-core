@@ -157,6 +157,26 @@ function PlaceSearch({
   const runSearch = useCallback(
     async (event: FormEvent) => {
       event.preventDefault();
+      /**
+       * 🔴 `stopPropagation` is NOT redundant beside `preventDefault`, and
+       * leaving it out was a real bug found by the first consumer.
+       *
+       * `preventDefault` stops *this* form navigating. It does nothing about
+       * the event continuing to bubble — and React replays a submit up the
+       * component tree, so a host that renders `MapPicker` inside its own
+       * `<form>` gets that form's `onSubmit` fired by our Search button, or by
+       * a bare Enter in the search box.
+       *
+       * In Grow Daisy the surrounding form **saves the gardener's garden
+       * coordinates**. So pressing "Search" wrote the very location the user
+       * was searching to correct. A host cannot defend against this: the
+       * offending button is ours, so no amount of `type="button"` discipline
+       * on their side reaches it.
+       *
+       * A component that renders a `<form>` is responsible for keeping its
+       * submits to itself.
+       */
+      event.stopPropagation();
 
       const trimmed = query.trim();
       if (trimmed.length < MIN_QUERY_LENGTH) return;

@@ -10,13 +10,18 @@
       "require": "./dist/index.js",
       "import": "./dist/index.mjs",
       "types": "./dist/index.d.ts"
+    },
+    "./MapPicker": {
+      "require": "./dist/mapPicker.js",
+      "import": "./dist/mapPicker.mjs",
+      "types": "./dist/mapPicker.d.ts"
     }
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "build": "tsup src/index.ts src/mapPicker.ts --format cjs,esm --dts",
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
     "lint": "tsc --noEmit",
     "prepublishOnly": "npm run build"
