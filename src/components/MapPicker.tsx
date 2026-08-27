@@ -52,8 +52,17 @@ export interface MapPickerProps {
    *
    * Reject the promise to signal failure — the component shows a recoverable
    * error and leaves the map usable.
+   *
+   * 🔴 `signal` is aborted as soon as the lookup is superseded — the user typed
+   * on, dismissed the list, or picked a place. **Forward it to `fetch`**, or the
+   * cancellation is decorative: the box will ignore the late answer either way,
+   * but the request stays on the wire and keeps burning the geocoder's rate
+   * budget. If you already pass a timeout signal of your own, combine them with
+   * `AbortSignal.any([signal, AbortSignal.timeout(ms)])` rather than dropping
+   * this one. The parameter is optional so that existing one-argument lookups
+   * stay assignable; they simply lose the cancellation.
    */
-  searchPlace?: (query: string) => Promise<MapPickerSearchResult[]>;
+  searchPlace?: (query: string, signal?: AbortSignal) => Promise<MapPickerSearchResult[]>;
   /** Applied to the outermost element, so the app controls spacing and borders. */
   className?: string;
   /** Accessible name for the map region. */
