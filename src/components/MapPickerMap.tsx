@@ -222,10 +222,16 @@ type SearchStatus = 'idle' | 'searching' | 'empty' | 'error';
 function PlaceSearch({
   searchPlace,
   placeholder,
+  emptySearchHint,
   onSelect,
 }: {
-  searchPlace: (query: string, signal?: AbortSignal) => Promise<MapPickerSearchResult[]>;
+  searchPlace: (
+    query: string,
+    signal?: AbortSignal,
+    options?: { explicit?: boolean }
+  ) => Promise<MapPickerSearchResult[]>;
   placeholder: string;
+  emptySearchHint?: string;
   onSelect: (result: MapPickerSearchResult) => void;
 }) {
   const [query, setQuery] = useState('');
@@ -287,7 +293,7 @@ function PlaceSearch({
   }, []);
 
   const dispatchSearch = useCallback(
-    async (normalised: string) => {
+    async (normalised: string, explicit: boolean) => {
       supersede();
 
       const controller = new AbortController();
@@ -303,7 +309,23 @@ function PlaceSearch({
       setIsOpen(true);
 
       try {
-        const found = await searchPlace(normalised, controller.signal);
+        /*
+          🔴 `explicit` tells the consumer whether a HUMAN asked for this lookup
+          (Enter, or the Search button) or whether it is type-ahead.
+
+          That distinction is not cosmetic: it is what lets a consumer answer
+          type-ahead from a local dataset at zero cost while still reaching a
+          real geocoder when someone deliberately asks for a place the local
+          data does not know. Grow Daisy ships 34,311 GB place names and falls
+          back to a worldwide lookup only on an explicit search — so a gardener
+          in Cork is not stranded, and nobody pays a network request per
+          keystroke to make that possible.
+
+          The library stays ignorant of any of that. It reports which kind of
+          search this is; what to do about it belongs to whoever supplies
+          `searchPlace`.
+        */
+        const found = await searchPlace(normalised, controller.signal, { explicit });
         if (requestRef.current !== requestId) return;
         inFlightRef.current = false;
         setResults(found);
@@ -355,7 +377,7 @@ function PlaceSearch({
 
       timerRef.current = setTimeout(() => {
         timerRef.current = null;
-        void dispatchSearch(normalised);
+        void dispatchSearch(normalised, immediate);
       }, delay);
     },
     [cancelPending, dispatchSearch, results.length],
@@ -545,13 +567,15 @@ function PlaceSearch({
     if (status === 'error') {
       return 'Place search is unavailable right now. You can still drop a pin on the map.';
     }
-    if (status === 'empty') return 'No matching places.';
+    if (status === 'empty') {
+      return emptySearchHint ? `No matching places. ${emptySearchHint}` : 'No matching places.';
+    }
     if (isExpanded) {
       return `${results.length} ${results.length === 1 ? 'place' : 'places'} found.`
         + ' Use the up and down arrow keys to review them, then Enter to choose.';
     }
     return '';
-  }, [status, isExpanded, results.length]);
+  }, [status, isExpanded, results.length, emptySearchHint]);
 
   const isMessageVisible = status === 'error' || status === 'empty';
 
@@ -655,6 +679,7 @@ export default function MapPickerMap({
   className,
   ariaLabel = 'Map location picker',
   searchPlaceholder = 'Search for a place',
+  emptySearchHint,
   markerColor = DEFAULT_MARKER_COLOR,
 }: MapPickerProps) {
   // Validated once so the pin and the accuracy circle cannot disagree about the
@@ -689,6 +714,7 @@ export default function MapPickerMap({
         <PlaceSearch
           searchPlace={searchPlace}
           placeholder={searchPlaceholder}
+          emptySearchHint={emptySearchHint}
           onSelect={handleSearchSelect}
         />
       ) : null}

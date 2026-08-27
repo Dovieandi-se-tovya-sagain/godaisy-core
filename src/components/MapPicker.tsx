@@ -62,7 +62,31 @@ export interface MapPickerProps {
    * this one. The parameter is optional so that existing one-argument lookups
    * stay assignable; they simply lose the cancellation.
    */
-  searchPlace?: (query: string, signal?: AbortSignal) => Promise<MapPickerSearchResult[]>;
+  /**
+   * Look up a place name. Omit it and no search box renders.
+   *
+   * 🔴 `options.explicit` is true when a HUMAN asked — Enter, or the Search
+   * button — and false for type-ahead. The distinction lets a consumer answer
+   * keystrokes from a local dataset for free and reach a real geocoder only
+   * when someone deliberately asks for something the local data lacks. What to
+   * do with it is entirely the consumer's business; this component only
+   * reports which kind of search it is.
+   *
+   * ⚠️ Forward `options.signal` to your `fetch`, or the supersede is
+   * decorative — the stale ANSWER is discarded either way, but the REQUEST
+   * still went, and rate-limited geocoders charge for it.
+   */
+  searchPlace?: (
+    query: string,
+    signal?: AbortSignal,
+    options?: { explicit?: boolean }
+  ) => Promise<MapPickerSearchResult[]>;
+  /**
+   * Shown under "No matching places." Use it to tell the gardener that pressing
+   * Enter widens the search, when your `searchPlace` does something different
+   * for an explicit lookup. Omitted, nothing extra renders.
+   */
+  emptySearchHint?: string;
   /** Applied to the outermost element, so the app controls spacing and borders. */
   className?: string;
   /** Accessible name for the map region. */
