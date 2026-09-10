@@ -23,10 +23,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -57,7 +57,7 @@ jobs:
       # so this step's outcome is what's checked below.
       - name: Create GitHub Issue on failure
         if: ${{ failure() && steps.ingest.outcome == 'failure' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const title = '🚨 FINDR MET Norway ingestion failed';
@@ -97,7 +97,7 @@ jobs:
 
       - name: Close resolved failure alerts
         if: ${{ steps.ingest.outcome == 'success' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const issues = await github.rest.issues.listForRepo({
