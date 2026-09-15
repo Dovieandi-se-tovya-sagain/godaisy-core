@@ -494,6 +494,17 @@ describe('openMeteoUrl', () => {
       const keyed = openMeteoSdkRequest('forecast', '/v1/forecast', params, 'k1');
       expect(keyed.params).toEqual({ latitude: 1, apikey: 'k1' });
     });
+
+    it('cannot come in through the path either', () => {
+      expect(() => openMeteoUrl('forecast', '/v1/forecast?apikey=caller', {}, null)).toThrow(TypeError);
+      expect(() => openMeteoUrl('forecast', '/v1/forecast#apikey=caller', {}, 'k1')).toThrow(TypeError);
+      expect(() => openMeteoSdkRequest('marine', '/v1/marine?apikey=caller', {}, null)).toThrow(TypeError);
+      try {
+        openMeteoUrl('forecast', '/v1/forecast?apikey=caller', {}, null);
+      } catch (e) {
+        expect(String(e)).not.toContain('caller');
+      }
+    });
   });
 
   describe('weather metrics never store the key', () => {

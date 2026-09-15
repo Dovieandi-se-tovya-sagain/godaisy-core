@@ -88,8 +88,18 @@ export function openMeteoHost(api: OpenMeteoApi, apiKey: string | null | undefin
   return hostFor(api, normaliseOpenMeteoApiKey(apiKey));
 }
 
+/**
+ * A pathname only. A query or fragment here would carry parameters -- an apikey
+ * among them -- past the rules that params follow. The message never echoes the
+ * path, which could hold a key.
+ */
+function pathname(path: string): string {
+  if (/[?#]/.test(path)) throw new TypeError('Open-Meteo path must be a pathname; pass parameters separately');
+  return path.startsWith('/') ? path : `/${path}`;
+}
+
 function baseUrl(api: OpenMeteoApi, path: string, key: string | undefined): string {
-  return `https://${hostFor(api, key)}${path.startsWith('/') ? path : `/${path}`}`;
+  return `https://${hostFor(api, key)}${pathname(path)}`;
 }
 
 /**
@@ -337,7 +347,7 @@ function render(value: unknown): Rendering {
       const ctor = read(v, 'constructor');
       if (typeof ctor === 'function') parts.push(text(read(ctor, 'name')));
 
-      if (v instanceof Error) {
+      if (isErrorLike(v)) {
         const names = ERROR_FIELDS.filter((name) => name in v);
         for (const name of ownKeys(v)) if (!names.includes(name)) names.push(name);
         props(v, names);
@@ -391,6 +401,16 @@ function render(value: unknown): Rendering {
   return { text: parts.join('\n'), verified };
 }
 
+/**
+ * An Error, or a DOMException. In Node a DOMException is an Error, but not across
+ * realms (Jest's test environment has its own Error), and there it would lose its
+ * message and be printed as {}.
+ */
+function isErrorLike(v: unknown): v is Error {
+  if (v instanceof Error) return true;
+  return typeof DOMException !== 'undefined' && v instanceof DOMException;
+}
+
 function carriesKey(texts: Array<string | undefined>, key: string | undefined): boolean {
   return texts.some((t) => t !== undefined && redactText(t, key) !== t);
 }
@@ -421,7 +441,7 @@ function sanitised(original: unknown, rendering: Rendering, key: string | undefi
   }
   let isError = false;
   try {
-    isError = original instanceof Error;
+    isError = isErrorLike(original);
   } catch {
     // treat as a non-error
   }
