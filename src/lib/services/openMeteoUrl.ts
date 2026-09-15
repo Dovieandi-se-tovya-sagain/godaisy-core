@@ -136,12 +136,12 @@ export function openMeteoSdkRequest<P extends Record<string, unknown>>(
   path: string,
   params: P,
   apiKey: string | null | undefined = getOpenMeteoApiKey()
-): { url: string; params: P & { apikey?: string } } {
+): { url: string; params: Omit<P, 'apikey'> & { apikey?: string } } {
   const key = normaliseOpenMeteoApiKey(apiKey);
   // One normalised key controls both the host and apikey: never forward a caller's.
   const rest = Object.fromEntries(
     Object.entries(params).filter(([name]) => name.toLowerCase() !== 'apikey')
-  ) as P;
+  ) as Omit<P, 'apikey'>;
   return {
     url: baseUrl(api, path, key),
     params: key ? { ...rest, apikey: key } : rest,
