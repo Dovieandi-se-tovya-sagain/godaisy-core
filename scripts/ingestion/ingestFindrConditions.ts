@@ -20,6 +20,7 @@ import {
   fetchWorldTides,
   type WorldTidesResponse,
 } from '../../src/lib/services/weatherService';
+import { redactOpenMeteoError } from '../../src/lib/services/openMeteoUrl';
 
 interface UpsertRow {
   rectangle_code: string;
@@ -738,7 +739,7 @@ async function buildOpenMeteoMarineFallback(
     }
   } catch (error) {
     // Weather data is supplementary - don't fail if it's unavailable
-    console.warn(`[OpenMeteo] Weather data fetch failed for ${lat.toFixed(4)},${lon.toFixed(4)}:`, error);
+    console.warn(`[OpenMeteo] Weather data fetch failed for ${lat.toFixed(4)},${lon.toFixed(4)}:`, redactOpenMeteoError(error));
   }
 
   return {

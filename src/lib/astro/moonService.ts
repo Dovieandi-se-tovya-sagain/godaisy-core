@@ -2,7 +2,7 @@ import { Temporal } from '@js-temporal/polyfill';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseServerClient } from '../supabase/serverClient';
 import { round0dp } from '../utils/coordinates';
-import { openMeteoUrl, redactOpenMeteoApiKey } from '../services/openMeteoUrl';
+import { openMeteoUrl, redactOpenMeteoError } from '../services/openMeteoUrl';
 import suncalc from 'suncalc';
 const { getMoonTimes, getTimes, getMoonIllumination } = suncalc;
 
@@ -391,8 +391,9 @@ function computeExpiryIso(localDate: string, timeZone: string): string {
 }
 
 /**
- * Fetch astronomy data from Open-Meteo (FREE, no API key required)
- * Primary data source for sun data; moon data comes from SunCalc
+ * Fetch astronomy data from Open-Meteo. Free API by default (no key needed); the
+ * paid customer API (customer-api.open-meteo.com + apikey) when OPEN_METEO_API_KEY
+ * is set. Primary data source for sun data; moon data comes from SunCalc
  */
 async function fetchFromOpenMeteo(lat: number, lon: number, date: string): Promise<IpGeoAstronomyResponse | null> {
   try {
@@ -450,7 +451,7 @@ async function fetchFromOpenMeteo(lat: number, lon: number, date: string): Promi
     console.log('✅ Open-Meteo + SunCalc: Astronomy data found');
     return result;
   } catch (error) {
-    console.error('❌ Open-Meteo error:', redactOpenMeteoApiKey(error instanceof Error ? error.message : String(error)));
+    console.error('❌ Open-Meteo error:', redactOpenMeteoError(error));
     return null;
   }
 }
@@ -587,7 +588,7 @@ export async function getMoonSunData(params: FetchParams): Promise<MoonSunData> 
   let live: IpGeoAstronomyResponse | null = null;
   let source = 'unknown';
 
-  // 2. Try Open-Meteo (FREE, no API key required)
+  // 2. Try Open-Meteo (free API by default; customer API when OPEN_METEO_API_KEY is set)
   live = await fetchFromOpenMeteo(params.lat, params.lon, previewDate);
   if (live) {
     source = 'openmeteo';

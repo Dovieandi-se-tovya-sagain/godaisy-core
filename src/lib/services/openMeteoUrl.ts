@@ -14,10 +14,19 @@
  *     where serverPrefix is the free host's first label -- so customer-marine-api,
  *     customer-air-quality-api, customer-geocoding-api and so on.
  *
+ * Every builder takes an optional `apiKey` override. Omitted (or `undefined`), it
+ * defaults to the environment; either way the value is normalised once -- trimmed,
+ * and empty or whitespace means "no key" -- and that single value decides both the
+ * host and the `apikey` parameter.
+ *
  * The key is read on the server only. In a browser bundle OPEN_METEO_API_KEY is
  * undefined (it is not NEXT_PUBLIC_), so browser code keeps using the free host and
- * the key cannot leak into client JS. Never log a URL built here without passing it
- * through redactOpenMeteoApiKey().
+ * the key cannot leak into client JS.
+ *
+ * A URL built here carries the key. Never log, store, throw or return one without
+ * redactOpenMeteoApiKey(); never log or record a caught error from a request made
+ * with one without redactOpenMeteoError(). Node's fetch puts the full URL in the
+ * message and stack of a "Failed to parse URL" TypeError (measured 2026-09-15).
  */
 
 /** Only APIs whose free host was verified against open-meteo.com/en/docs. */
@@ -52,21 +61,35 @@ export type OpenMeteoParamValue =
   | undefined;
 
 /**
- * The configured customer key, or undefined. Trimmed because a pasted secret with a
- * trailing newline would otherwise be sent as part of the key and rejected.
+ * Trim a key; empty or whitespace-only means no key. Trimming matters because a
+ * pasted secret with a trailing newline would otherwise be sent and rejected.
  */
-export function getOpenMeteoApiKey(): string | undefined {
-  if (typeof process === 'undefined' || !process.env) return undefined;
-  const key = process.env.OPEN_METEO_API_KEY?.trim();
+export function normaliseOpenMeteoApiKey(value: string | null | undefined): string | undefined {
+  const key = typeof value === 'string' ? value.trim() : '';
   return key ? key : undefined;
 }
 
-export function openMeteoHost(api: OpenMeteoApi, apiKey: string | undefined = getOpenMeteoApiKey()): string {
-  return `${apiKey ? 'customer-' : ''}${HOST_PREFIX[api]}.open-meteo.com`;
+/** The configured customer key from OPEN_METEO_API_KEY, normalised, or undefined. */
+export function getOpenMeteoApiKey(): string | undefined {
+  if (typeof process === 'undefined' || !process.env) return undefined;
+  return normaliseOpenMeteoApiKey(process.env.OPEN_METEO_API_KEY);
 }
 
-function baseUrl(api: OpenMeteoApi, path: string, apiKey: string | undefined): string {
-  return `https://${openMeteoHost(api, apiKey)}${path.startsWith('/') ? path : `/${path}`}`;
+/**
+ * Host for an ALREADY-normalised key. Deliberately has no default: passing a key
+ * that normalised to undefined into openMeteoHost() would trigger its default
+ * parameter and pick the environment key back up.
+ */
+function hostFor(api: OpenMeteoApi, key: string | undefined): string {
+  return `${key ? 'customer-' : ''}${HOST_PREFIX[api]}.open-meteo.com`;
+}
+
+export function openMeteoHost(api: OpenMeteoApi, apiKey: string | null | undefined = getOpenMeteoApiKey()): string {
+  return hostFor(api, normaliseOpenMeteoApiKey(apiKey));
+}
+
+function baseUrl(api: OpenMeteoApi, path: string, key: string | undefined): string {
+  return `https://${hostFor(api, key)}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
 /**
@@ -79,14 +102,15 @@ export function openMeteoUrl(
   api: OpenMeteoApi,
   path: string,
   params: Record<string, OpenMeteoParamValue> = {},
-  apiKey: string | undefined = getOpenMeteoApiKey()
+  apiKey: string | null | undefined = getOpenMeteoApiKey()
 ): URL {
-  const url = new URL(baseUrl(api, path, apiKey));
+  const key = normaliseOpenMeteoApiKey(apiKey);
+  const url = new URL(baseUrl(api, path, key));
   for (const [name, value] of Object.entries(params)) {
     if (value === undefined || value === null) continue;
     url.searchParams.set(name, Array.isArray(value) ? value.join(',') : String(value));
   }
-  if (apiKey) url.searchParams.set('apikey', apiKey);
+  if (key) url.searchParams.set('apikey', key);
   return url;
 }
 
@@ -99,11 +123,12 @@ export function openMeteoSdkRequest<P extends Record<string, unknown>>(
   api: OpenMeteoApi,
   path: string,
   params: P,
-  apiKey: string | undefined = getOpenMeteoApiKey()
+  apiKey: string | null | undefined = getOpenMeteoApiKey()
 ): { url: string; params: P & { apikey?: string } } {
+  const key = normaliseOpenMeteoApiKey(apiKey);
   return {
-    url: baseUrl(api, path, apiKey),
-    params: apiKey ? { ...params, apikey: apiKey } : params,
+    url: baseUrl(api, path, key),
+    params: key ? { ...params, apikey: key } : params,
   };
 }
 
@@ -113,7 +138,48 @@ const APIKEY_PARAM = /([?&]apikey=)[^&#\s"'\\]*/gi;
  * Replace any `apikey=` value in a URL or message with REDACTED, and any literal
  * occurrence of the configured key as well. Safe to call on text with no key in it.
  */
-export function redactOpenMeteoApiKey(text: string, apiKey: string | undefined = getOpenMeteoApiKey()): string {
+export function redactOpenMeteoApiKey(text: string, apiKey: string | null | undefined = getOpenMeteoApiKey()): string {
+  const key = normaliseOpenMeteoApiKey(apiKey);
   const redacted = text.replace(APIKEY_PARAM, '$1REDACTED');
-  return apiKey ? redacted.split(apiKey).join('REDACTED') : redacted;
+  return key ? redacted.split(key).join('REDACTED') : redacted;
+}
+
+/**
+ * An error that is safe to log, record or rethrow: message, stack and cause chain
+ * redacted. Returns the original value untouched when there is nothing to redact,
+ * so callers that compare identity or inspect other providers' errors see no change.
+ */
+export function redactOpenMeteoError(
+  error: unknown,
+  apiKey: string | null | undefined = getOpenMeteoApiKey(),
+  depth = 0
+): unknown {
+  if (typeof error === 'string') return redactOpenMeteoApiKey(error, apiKey);
+  if (!(error instanceof Error)) {
+    if (error === null || typeof error !== 'object') return error;
+    // A thrown plain object (e.g. { status, url }). Only replace it if it leaks.
+    try {
+      const text = JSON.stringify(error);
+      if (text !== undefined) {
+        const safe = redactOpenMeteoApiKey(text, apiKey);
+        if (safe !== text) return safe;
+      }
+    } catch {
+      // Unserialisable (cyclic) -- leave it; String() of it cannot carry a URL.
+    }
+    return error;
+  }
+
+  const message = redactOpenMeteoApiKey(error.message, apiKey);
+  const stack = error.stack === undefined ? undefined : redactOpenMeteoApiKey(error.stack, apiKey);
+  const original = error as Error & { cause?: unknown };
+  const hasCause = 'cause' in original && original.cause !== undefined;
+  const cause = hasCause && depth < 3 ? redactOpenMeteoError(original.cause, apiKey, depth + 1) : original.cause;
+  if (message === error.message && stack === error.stack && cause === original.cause) return error;
+
+  const safe = new Error(message) as Error & { cause?: unknown };
+  safe.name = error.name;
+  if (stack !== undefined) safe.stack = stack;
+  if (hasCause) safe.cause = cause;
+  return safe;
 }

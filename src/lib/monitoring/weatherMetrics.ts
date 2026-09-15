@@ -1,3 +1,5 @@
+import { redactOpenMeteoApiKey, redactOpenMeteoError } from '../services/openMeteoUrl';
+
 type OutcomeDetails = {
   status?: number;
   note?: string;
@@ -55,8 +57,12 @@ export type WeatherMetricsSnapshot = {
 };
 
 const nowISO = () => new Date().toISOString();
+// Everything stored here ends up in snapshot(), so redact Open-Meteo keys on the way
+// in, for every provider and every caller -- before truncating, so a cut can never
+// leave part of a key behind. A no-op for text without an apikey in it.
 const clampError = (value: unknown, max = 500) =>
-  String(value instanceof Error ? value.message : value ?? 'Unknown error').slice(0, max);
+  redactOpenMeteoApiKey(String(value instanceof Error ? value.message : value ?? 'Unknown error')).slice(0, max);
+const safeNote = (note: string | undefined) => (note === undefined ? undefined : redactOpenMeteoApiKey(note));
 
 class WeatherMetrics {
   private providers = new Map<string, ProviderMetric>();
@@ -70,7 +76,7 @@ class WeatherMetrics {
     providerMetric.requests += 1;
     providerMetric.lastRequestAt = ts;
     providerMetric.lastEndpoint = endpoint;
-    providerMetric.lastNote = note;
+    providerMetric.lastNote = safeNote(note);
 
     endpointMetric.requests += 1;
     endpointMetric.lastRequestAt = ts;
@@ -227,7 +233,11 @@ export async function monitoredFetch(
     }
     return response;
   } catch (error) {
-    span.failure(error);
-    throw error;
+    // Open-Meteo customer URLs carry apikey, and a fetch exception can quote its URL
+    // (a parse failure does, in message and stack). Callers get the redacted error too.
+    // Errors with nothing to redact pass through as the same object.
+    const safe = redactOpenMeteoError(error);
+    span.failure(safe);
+    throw safe;
   }
 }

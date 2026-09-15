@@ -1,6 +1,6 @@
 import { fetchWeatherApi } from 'openmeteo';
 import { monitoredFetch, weatherMetrics } from '../monitoring/weatherMetrics';
-import { openMeteoSdkRequest, openMeteoUrl, redactOpenMeteoApiKey } from './openMeteoUrl';
+import { getOpenMeteoApiKey, openMeteoSdkRequest, openMeteoUrl, redactOpenMeteoApiKey, redactOpenMeteoError } from './openMeteoUrl';
 import {
   round3dp as round3dpUtil,
   round1dp,
@@ -568,8 +568,10 @@ async function fetchOpenMeteoMarineSeries(
     span.success({ status: 200 });
     return { hours: limited, firstHour } satisfies OpenMeteoMarineSeriesResult;
   } catch (error) {
-    span.failure(error);
-    console.warn('Open-Meteo marine fetch failed', redactOpenMeteoApiKey(error instanceof Error ? error.message : String(error)));
+    // The SDK request carries apikey when configured; a fetch exception can quote it.
+    const safe = redactOpenMeteoError(error);
+    span.failure(safe);
+    console.warn('Open-Meteo marine fetch failed', safe);
     return null;
   }
 }
@@ -875,7 +877,8 @@ async function fetchFromMetNoWeather(lat: number, lon: number): Promise<FullWeat
 }
 
 /**
- * Fetch weather data from Open-Meteo - Global, FREE
+ * Fetch weather data from Open-Meteo - Global. Free API by default; the paid
+ * customer API (customer-api.open-meteo.com + apikey) when OPEN_METEO_API_KEY is set.
  * https://open-meteo.com/en/docs
  */
 async function fetchFromOpenMeteoWeather(lat: number, lon: number): Promise<FullWeather | null> {
@@ -929,7 +932,7 @@ async function fetchFromOpenMeteoWeather(lat: number, lon: number): Promise<Full
       alerts: [],
     };
   } catch (error) {
-    console.warn('[Open-Meteo] Error fetching weather:', error);
+    console.warn('[Open-Meteo] Error fetching weather:', redactOpenMeteoError(error));
     return null;
   }
 }
@@ -938,9 +941,12 @@ async function fetchFromOpenMeteoWeather(lat: number, lon: number): Promise<Full
  * Get comprehensive weather data for a location with intelligent waterfall
  * 
  * Waterfall Strategy:
- * - US locations: NWS (free) → Open-Meteo (free) → OpenWeather (paid) → Stormglass (paid)
- * - Europe: Met.no (free) → Open-Meteo (free) → OpenWeather (paid) → Stormglass (paid)
- * - Other: Open-Meteo (free) → OpenWeather (paid) → Stormglass (paid)
+ * - US locations: NWS (free) → Open-Meteo → OpenWeather (paid) → Stormglass (paid)
+ * - Europe: Met.no (free) → Open-Meteo → OpenWeather (paid) → Stormglass (paid)
+ * - Other: Open-Meteo → OpenWeather (paid) → Stormglass (paid)
+ *
+ * Open-Meteo is the free API by default and the paid customer API when
+ * OPEN_METEO_API_KEY is set (see ./openMeteoUrl.ts).
  * 
  * @param lat Latitude
  * @param lon Longitude
@@ -980,11 +986,11 @@ async function getWeatherData(lat: number, lon: number): Promise<FullWeather> {
     }
   }
   
-  // Try Open-Meteo (global, free)
+  // Try Open-Meteo (global; free API, or the customer API when OPEN_METEO_API_KEY is set)
   console.log(`[Weather] Trying Open-Meteo (global)...`);
   weatherData = await fetchFromOpenMeteoWeather(lat, lon);
   if (weatherData) {
-    console.log('✅ [Weather] Using Open-Meteo (FREE)');
+    console.log(`✅ [Weather] Using Open-Meteo (${getOpenMeteoApiKey() ? 'customer API' : 'FREE'})`);
     weatherData.airQuality = await getAirQualityWithCache(lat, lon);
     return weatherData;
   }
@@ -1861,11 +1867,12 @@ async function fetchOpenMeteoAirPollen(lat: number, lon: number, startDate: stri
       const details = {
         status: errorObj.status,
         statusText: errorObj.statusText,
-        // The URL carries apikey when the customer API is configured.
-        url: redactOpenMeteoApiKey(errorObj.url),
+        url: errorObj.url,
         data: errorObj.data,
       };
-      throw new Error('Open-Meteo air/pollen fetch failed: ' + JSON.stringify(details));
+      // The URL carries apikey when the customer API is configured; redact the whole
+      // serialised message so neither the URL nor an echoing response body can leak it.
+      throw new Error('Open-Meteo air/pollen fetch failed: ' + redactOpenMeteoApiKey(JSON.stringify(details)));
     }
     throw new Error('Open-Meteo air/pollen fetch failed: ' + redactOpenMeteoApiKey(err instanceof Error ? err.message : String(err)));
   }
