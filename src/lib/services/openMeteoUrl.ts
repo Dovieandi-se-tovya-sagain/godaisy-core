@@ -145,8 +145,8 @@ const APIKEY_ASSIGNMENT = /(^|[^a-z])(apikey(?:=|%(?:25)*3d)["']?)(?:(?!%(?:25)*
 
 /**
  * Replace any `apikey` value in a URL or message with REDACTED, and any literal
- * occurrence of the configured key (plain or URL-encoded) as well. Safe to call on
- * text with no key in it.
+ * occurrence of the configured key (plain, URL-encoded or form-encoded) as well. Safe
+ * to call on text with no key in it.
  */
 export function redactOpenMeteoApiKey(text: string, apiKey: string | null | undefined = getOpenMeteoApiKey()): string {
   return redactText(text, normaliseOpenMeteoApiKey(apiKey));
@@ -156,9 +156,14 @@ export function redactOpenMeteoApiKey(text: string, apiKey: string | null | unde
 function redactText(text: string, key: string | undefined): string {
   let redacted = text.replace(APIKEY_ASSIGNMENT, '$1$2REDACTED');
   if (key) {
-    redacted = redacted.split(key).join('REDACTED');
-    const encoded = encodeURIComponent(key);
-    if (encoded !== key) redacted = redacted.split(encoded).join('REDACTED');
+    // The key as written, as encodeURIComponent writes it, and as URLSearchParams
+    // writes it into a request URL (openMeteoUrl above, and the SDK's own
+    // `?${new URLSearchParams(params)}`): space as +, and different escapes for a
+    // few punctuation characters. Longest first, so no variant is left half-done.
+    const variants = new Set([key, encodeURIComponent(key), new URLSearchParams({ k: key }).toString().slice(2)]);
+    for (const variant of [...variants].sort((a, b) => b.length - a.length)) {
+      redacted = redacted.split(variant).join('REDACTED');
+    }
   }
   return redacted;
 }

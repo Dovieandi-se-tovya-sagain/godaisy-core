@@ -407,6 +407,19 @@ describe('openMeteoUrl', () => {
       expect(redacted).not.toContain(encodeURIComponent(awkward));
       expect(redacted).not.toContain(awkward);
     });
+
+    it('redacts the configured key in the form encoding the request URL uses', () => {
+      // URLSearchParams writes a space as + and escapes some punctuation differently
+      // from encodeURIComponent (for example ' ( ) * ~ !).
+      for (const awkward of ['a b', "a'b(c)*d~e!f", 'a b/c+d']) {
+        const url = openMeteoUrl('forecast', '/v1/forecast', { latitude: 1 }, awkward);
+        const formEncoded = url.searchParams.toString().split('apikey=')[1];
+        const text = `failed near ${formEncoded} while fetching`;
+        const redacted = redactOpenMeteoApiKey(text, awkward);
+        expect(redacted).not.toContain(formEncoded);
+        expect(redacted).toBe('failed near REDACTED while fetching');
+      }
+    });
   });
 
   describe('weather metrics never store the key', () => {
