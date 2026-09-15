@@ -132,11 +132,21 @@ export function openMeteoSdkRequest<P extends Record<string, unknown>>(
   };
 }
 
-const APIKEY_PARAM = /([?&]apikey=)[^&#\s"'\\]*/gi;
+/**
+ * An `apikey` assignment wherever a word can start: at the start of the text or after
+ * any non-letter (?, &, space, quote, comma, semicolon, bracket, newline, ...).
+ * Case-insensitive; plain (`apikey=`) or URL-encoded (`apikey%3D`, `apikey%253D`);
+ * with an optional opening quote. Group 1 is the preceding character and group 2 the
+ * assignment, both kept. The value runs to the next separator, or in encoded text to
+ * an encoded `&`. Over-redacting the tail of a message is acceptable; leaving part of
+ * a key is not.
+ */
+const APIKEY_ASSIGNMENT = /(^|[^a-z])(apikey(?:=|%(?:25)*3d)["']?)(?:(?!%(?:25)*26)[^&#\s"'`\\<>,;()[\]{}])*/gi;
 
 /**
- * Replace any `apikey=` value in a URL or message with REDACTED, and any literal
- * occurrence of the configured key as well. Safe to call on text with no key in it.
+ * Replace any `apikey` value in a URL or message with REDACTED, and any literal
+ * occurrence of the configured key (plain or URL-encoded) as well. Safe to call on
+ * text with no key in it.
  */
 export function redactOpenMeteoApiKey(text: string, apiKey: string | null | undefined = getOpenMeteoApiKey()): string {
   return redactText(text, normaliseOpenMeteoApiKey(apiKey));
@@ -144,8 +154,13 @@ export function redactOpenMeteoApiKey(text: string, apiKey: string | null | unde
 
 /** Redact with an ALREADY-normalised key. No default, for the same reason as hostFor(). */
 function redactText(text: string, key: string | undefined): string {
-  const redacted = text.replace(APIKEY_PARAM, '$1REDACTED');
-  return key ? redacted.split(key).join('REDACTED') : redacted;
+  let redacted = text.replace(APIKEY_ASSIGNMENT, '$1$2REDACTED');
+  if (key) {
+    redacted = redacted.split(key).join('REDACTED');
+    const encoded = encodeURIComponent(key);
+    if (encoded !== key) redacted = redacted.split(encoded).join('REDACTED');
+  }
+  return redacted;
 }
 
 /** Built-in error types a redacted copy keeps. AggregateError is handled separately. */
@@ -161,24 +176,16 @@ const AggregateErrorCtor = (globalThis as {
   AggregateError?: new (errors: Iterable<unknown>, message?: string) => Error;
 }).AggregateError;
 
+/** Node's util.inspect.custom hook: user code a logger would run, so never trusted. */
+const INSPECT_CUSTOM = Symbol.for('nodejs.util.inspect.custom');
 /** Stands in for anything that could not be read. */
 const UNREADABLE = '[unreadable]';
-/** Arrays longer than this are not walked item by item; they are treated as unverifiable. */
-const MAX_ARRAY_ITEMS = 10_000;
-/** The fields of an error a logger prints, when present. */
-const ERROR_FIELDS = ['name', 'message', 'stack', 'cause', 'errors'];
+/** Collections larger than this are not rendered item by item; they force a copy. */
+const MAX_ITEMS = 10_000;
+/** The fields of an error a logger prints, when present (own or inherited). */
+const ERROR_FIELDS: PropertyKey[] = ['name', 'message', 'stack', 'cause', 'errors'];
 
-type FieldRead = { ok: true; value: unknown } | { ok: false };
-type Field = { name: unknown; read: FieldRead };
-type Shape = 'error' | 'array' | 'plain' | 'map' | 'set' | 'opaque';
-
-function readField(target: object, name: PropertyKey): FieldRead {
-  try {
-    return { ok: true, value: (target as Record<PropertyKey, unknown>)[name] };
-  } catch {
-    return { ok: false };
-  }
-}
+type Rendering = { text: string; verified: boolean };
 
 function safeString(value: unknown): string {
   try {
@@ -188,69 +195,161 @@ function safeString(value: unknown): string {
   }
 }
 
-function shapeOf(value: object): Shape {
+function safeJson(value: unknown): string | undefined {
   try {
-    if (value instanceof Error) return 'error';
-    if (Array.isArray(value)) return 'array';
-    if (value instanceof Map) return 'map';
-    if (value instanceof Set) return 'set';
-    const proto: unknown = Object.getPrototypeOf(value);
-    return proto === Object.prototype || proto === null ? 'plain' : 'opaque';
+    return JSON.stringify(value);
   } catch {
-    return 'opaque'; // e.g. a proxy whose traps throw
+    return undefined;
+  }
+}
+
+function readString(target: object, name: PropertyKey): string | undefined {
+  try {
+    const value = (target as Record<PropertyKey, unknown>)[name];
+    return typeof value === 'string' ? value : undefined;
+  } catch {
+    return undefined;
   }
 }
 
 /**
- * Every field a logger could print, or null when the structure cannot be read:
- * an error's name, message, stack, cause and errors plus its own enumerable
- * properties; array items; plain-object properties; Map and Set entries.
+ * Everything a logger or serialiser could print for a value, as text, and whether
+ * all of it was modelled.
+ *
+ * Covered, cycle-safe and with no depth limit: every own property -- string AND
+ * symbol keys, enumerable or not, names as well as values -- of every error, plain
+ * object, array, Map and Set (so custom properties on containers too); an error's
+ * name, message, stack, cause and errors (AggregateError), inherited or own; array
+ * items; Map keys and values; Set values; symbol descriptions; constructor names.
+ *
+ * `verified` turns false for anything not modelled -- a class instance, a function,
+ * an inspect hook, a getter or proxy trap that throws, an oversized collection, the
+ * stack running out -- and an unverified value is never passed through.
  */
-function fieldsOf(value: object, shape: Exclude<Shape, 'opaque'>): Field[] | null {
-  try {
-    switch (shape) {
-      case 'error': {
-        const names = ERROR_FIELDS.filter((name) => name in value);
-        for (const own of Object.keys(value)) if (!names.includes(own)) names.push(own);
-        return names.map((name) => ({ name, read: readField(value, name) }));
-      }
-      case 'array': {
-        const { length } = value as unknown[];
-        if (length > MAX_ARRAY_ITEMS) return null;
-        return Array.from({ length }, (_, index) => ({ name: index, read: readField(value, index) }));
-      }
-      case 'plain':
-        return Object.keys(value).map((name) => ({ name, read: readField(value, name) }));
-      case 'map':
-        return Array.from((value as Map<unknown, unknown>).entries(), ([name, entry]) => ({
-          name,
-          read: { ok: true, value: entry } as const,
-        }));
-      case 'set':
-        return Array.from((value as Set<unknown>).values(), (entry, index) => ({
-          name: index,
-          read: { ok: true, value: entry } as const,
-        }));
-      default:
-        return null;
+function render(value: unknown): Rendering {
+  const parts: string[] = [];
+  const seen = new Set<object>();
+  let verified = true;
+
+  function text(v: unknown): string {
+    try {
+      return String(v);
+    } catch {
+      verified = false;
+      return UNREADABLE;
     }
-  } catch {
-    return null;
   }
+
+  function read(target: object, name: PropertyKey): unknown {
+    try {
+      return (target as Record<PropertyKey, unknown>)[name];
+    } catch {
+      verified = false;
+      return UNREADABLE;
+    }
+  }
+
+  function ownKeys(target: object): PropertyKey[] {
+    try {
+      return Reflect.ownKeys(target);
+    } catch {
+      verified = false;
+      return [];
+    }
+  }
+
+  function props(target: object, names: PropertyKey[]): void {
+    for (const name of names) {
+      walk(name);
+      walk(read(target, name));
+    }
+  }
+
+  function walk(v: unknown): void {
+    if (typeof v === 'string') {
+      parts.push(v);
+      return;
+    }
+    if (typeof v === 'symbol') {
+      parts.push(text(v));
+      return;
+    }
+    if (typeof v === 'function') {
+      // A logger prints its name, and it may be a hook (toJSON, toString) that runs.
+      verified = false;
+      parts.push(`[function ${text(read(v, 'name'))}]`);
+      return;
+    }
+    if (v === null || typeof v !== 'object') {
+      parts.push(text(v));
+      return;
+    }
+    if (seen.has(v)) {
+      parts.push('[Circular]');
+      return;
+    }
+    seen.add(v);
+    try {
+      if (INSPECT_CUSTOM in v) verified = false;
+      const ctor = read(v, 'constructor');
+      if (typeof ctor === 'function') parts.push(text(read(ctor, 'name')));
+
+      if (v instanceof Error) {
+        const names = ERROR_FIELDS.filter((name) => name in v);
+        for (const name of ownKeys(v)) if (!names.includes(name)) names.push(name);
+        props(v, names);
+        return;
+      }
+      if (Array.isArray(v)) {
+        if (v.length > MAX_ITEMS) {
+          verified = false;
+          return;
+        }
+        props(v, ownKeys(v).filter((name) => name !== 'length'));
+        return;
+      }
+      if (v instanceof Map) {
+        if (v.size > MAX_ITEMS) {
+          verified = false;
+          return;
+        }
+        Array.from(v.entries()).forEach(([entryKey, entryValue]) => {
+          walk(entryKey);
+          walk(entryValue);
+        });
+        props(v, ownKeys(v));
+        return;
+      }
+      if (v instanceof Set) {
+        if (v.size > MAX_ITEMS) {
+          verified = false;
+          return;
+        }
+        Array.from(v.values()).forEach((entry) => walk(entry));
+        props(v, ownKeys(v));
+        return;
+      }
+      const proto: unknown = Object.getPrototypeOf(v);
+      if (proto === Object.prototype || proto === null) {
+        props(v, ownKeys(v));
+        return;
+      }
+      // Class instances, Dates, URLs, typed arrays, ...: not modelled. Render what
+      // String() and their own properties show, but never pass the original through.
+      verified = false;
+      parts.push(text(v));
+      props(v, ownKeys(v));
+    } catch {
+      verified = false; // a proxy trap or iterator threw, or the stack ran out
+    }
+  }
+
+  walk(value);
+  return { text: parts.join('\n'), verified };
 }
 
-/** True if anything reachable could print a key, or could not be verified. */
-function leaks(value: unknown, key: string | undefined, seen: Set<object>): boolean {
-  if (typeof value === 'string') return redactText(value, key) !== value;
-  if (typeof value === 'function' || typeof value === 'symbol') return true;
-  if (value === null || typeof value !== 'object') return false;
-  if (seen.has(value)) return false;
-  seen.add(value);
-  const shape = shapeOf(value);
-  if (shape === 'opaque') return true;
-  const fields = fieldsOf(value, shape);
-  if (fields === null) return true;
-  return fields.some((field) => !field.read.ok || leaks(field.name, key, seen) || leaks(field.read.value, key, seen));
+function carriesKey(texts: Array<string | undefined>, key: string | undefined): boolean {
+  return texts.some((t) => t !== undefined && redactText(t, key) !== t);
 }
 
 function errorLike(original: object, message: string): Error {
@@ -263,107 +362,59 @@ function errorLike(original: object, message: string): Error {
   return new Error(message);
 }
 
-/** A redacted copy. `memo` maps each original object to its copy, so cycles survive. */
-function copy(value: unknown, key: string | undefined, memo: Map<object, unknown>): unknown {
-  if (typeof value === 'string') return redactText(value, key);
-  if (typeof value === 'function') return '[function]';
-  if (typeof value === 'symbol') return redactText(safeString(value), key);
-  if (value === null || typeof value !== 'object') return value;
-  if (memo.has(value)) return memo.get(value);
-
-  const shape = shapeOf(value);
-  const fields = shape === 'opaque' ? null : fieldsOf(value, shape);
-  if (shape === 'opaque' || fields === null) {
-    // Class instances and unreadable structures become a redacted string; a URL
-    // object, for instance, renders as its (redacted) href.
-    const text = redactText(safeString(value), key);
-    memo.set(value, text);
-    return text;
+/**
+ * The sanitised stand-in: a NEW error of the original's built-in type and name, whose
+ * message is the redacted message and whose stack is the redacted rendering, with no
+ * other properties -- nothing can survive in a symbol, a property name or a container.
+ */
+function sanitised(original: unknown, rendering: Rendering, key: string | undefined): unknown {
+  if (original === null || (typeof original !== 'object' && typeof original !== 'function')) {
+    return redactText(safeString(original), key);
   }
-  const item = (read: FieldRead) => (read.ok ? copy(read.value, key, memo) : UNREADABLE);
-
-  switch (shape) {
-    case 'array': {
-      const out: unknown[] = [];
-      memo.set(value, out);
-      for (const field of fields) out.push(item(field.read));
-      return out;
-    }
-    case 'plain': {
-      const out: Record<string, unknown> = {};
-      memo.set(value, out);
-      for (const field of fields) out[redactText(safeString(field.name), key)] = item(field.read);
-      return out;
-    }
-    case 'map': {
-      const out = new Map<unknown, unknown>();
-      memo.set(value, out);
-      for (const field of fields) out.set(copy(field.name, key, memo), item(field.read));
-      return out;
-    }
-    case 'set': {
-      const out = new Set<unknown>();
-      memo.set(value, out);
-      for (const field of fields) out.add(item(field.read));
-      return out;
-    }
-    default: {
-      const messageRead = fields.find((field) => field.name === 'message')?.read;
-      const message = messageRead?.ok
-        ? redactText(typeof messageRead.value === 'string' ? messageRead.value : safeString(messageRead.value), key)
-        : UNREADABLE;
-      const out = errorLike(value, message) as Error & Record<string, unknown>;
-      memo.set(value, out);
-      for (const field of fields) {
-        const name = String(field.name);
-        if (name === 'message') continue;
-        if (name === 'stack') {
-          out.stack = field.read.ok && typeof field.read.value === 'string'
-            ? redactText(field.read.value, key)
-            : `${out.name}: ${message}`;
-          continue;
-        }
-        if (name === 'name') {
-          if (field.read.ok && typeof field.read.value === 'string') {
-            const redactedName = redactText(field.read.value, key);
-            if (redactedName !== out.name) out.name = redactedName;
-          }
-          continue;
-        }
-        const safeValue = item(field.read);
-        if (name === 'cause' || name === 'errors') {
-          // Non-enumerable, as on a native error, so loggers print [cause] / [errors].
-          Object.defineProperty(out, name, { value: safeValue, writable: true, configurable: true, enumerable: false });
-        } else {
-          out[name] = safeValue;
-        }
-      }
-      return out;
+  let isError = false;
+  try {
+    isError = original instanceof Error;
+  } catch {
+    // treat as a non-error
+  }
+  const ownMessage = isError ? readString(original, 'message') : undefined;
+  const message = redactText(ownMessage ?? safeJson(original) ?? rendering.text, key);
+  const out = errorLike(original, message);
+  if (isError) {
+    const name = readString(original, 'name');
+    if (name !== undefined) {
+      const redactedName = redactText(name, key);
+      if (redactedName !== out.name) out.name = redactedName;
     }
   }
+  out.stack = `${out.name}: ${message}\n    [Open-Meteo key redacted; what the original would have printed follows]\n${redactText(rendering.text, key)}`;
+  return out;
 }
 
 /**
- * A value that is safe to log, record, rethrow or return.
+ * A value that is safe to log, record, rethrow or return -- defined by what gets
+ * printed, not by object shape.
  *
- * The whole structure is walked -- cycle-safe, with no depth limit -- through every
- * field a logger could print: an error's name, message, stack, `cause` and `errors`
- * (AggregateError) and its own enumerable properties; array items; plain-object keys
- * and values; Map and Set entries.
+ * The value is rendered as a logger or serialiser would see it (see render()), and
+ * String() and JSON.stringify() of it are checked too. If none of that carries a key
+ * and everything was modelled, the original is returned unchanged, so other
+ * providers' errors keep their identity. Otherwise the result is a new error of the
+ * same built-in type (TypeError, AggregateError, ...) and name, carrying the redacted
+ * message and, as its stack, the redacted rendering -- and nothing else. Strings come
+ * back redacted. If even this fails, a generic Error is returned; the original is
+ * never handed back unverified.
  *
- * If nothing reachable carries a key, the original is returned unchanged, so other
- * providers' errors keep their identity (monitoredFetch relies on this). Otherwise a
- * redacted copy is returned: errors keep their built-in type (TypeError,
- * AggregateError, ...) and name, cycles are preserved, and anything that cannot be
- * verified -- class instances, functions, throwing getters, proxies -- becomes a
- * redacted string or a placeholder rather than being passed through. If even that
- * fails (a chain deep enough to exhaust the stack, say), a generic Error is returned.
- * The original is never handed back unverified.
+ * util.inspect is deliberately not used for the rendering: godaisy-core's copy of this
+ * helper is part of the package entry point that browser bundles import, where
+ * node:util is not reliably available, and the two copies are kept identical.
  */
 export function redactOpenMeteoError(error: unknown, apiKey: string | null | undefined = getOpenMeteoApiKey()): unknown {
   const key = normaliseOpenMeteoApiKey(apiKey);
   try {
-    return leaks(error, key, new Set()) ? copy(error, key, new Map()) : error;
+    if (typeof error === 'string') return redactText(error, key);
+    const rendering = render(error);
+    if (rendering.verified && !carriesKey([rendering.text, safeString(error), safeJson(error)], key)) return error;
+    return sanitised(error, rendering, key);
   } catch {
     return new Error('[Open-Meteo error withheld: it could not be inspected safely]');
   }

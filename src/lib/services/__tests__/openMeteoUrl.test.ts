@@ -190,65 +190,60 @@ describe('openMeteoUrl', () => {
     });
   });
 
-  describe('redactOpenMeteoError walks the whole structure', () => {
+  describe('redactOpenMeteoError: whatever a logger could print is checked', () => {
     const keyed = () => openMeteoUrl('forecast', '/v1/forecast', { latitude: 1 }, FAKE_KEY).toString();
-    /** What a logger would print (util.inspect, which follows cause/errors) plus a serialised view. */
-    const shown = (value: unknown) => `${inspect(value, { depth: null })}\n${everything(value)}`;
+    /** util.inspect as console.log uses it, and with hidden properties, plus a serialised view. */
+    const shown = (value: unknown) =>
+      [inspect(value, { depth: null }), inspect(value, { depth: null, showHidden: true }), everything(value)].join('\n');
     const withCause = <E extends Error>(err: E, cause: unknown): E => {
       Object.defineProperty(err, 'cause', { value: cause, writable: true, configurable: true, enumerable: false });
       return err;
     };
-    type Aggregate = Error & { errors: unknown[] };
     const AggregateCtor = (globalThis as unknown as {
-      AggregateError: new (errors: unknown[], message?: string) => Aggregate;
+      AggregateError: new (errors: unknown[], message?: string) => Error & { errors: unknown[] };
     }).AggregateError;
 
     beforeEach(() => {
       process.env.OPEN_METEO_API_KEY = FAKE_KEY;
     });
 
-    it('redacts causes deeper than three levels and keeps the whole chain', () => {
+    it('redacts a cause deeper than three levels, keeping its text', () => {
       let err: Error = new Error(`innermost ${keyed()}`);
       for (let i = 0; i < 6; i++) err = withCause(new Error(`level ${i}`), err);
 
-      const safe = redactOpenMeteoError(err);
+      const safe = redactOpenMeteoError(err) as Error;
+      expect(safe).not.toBe(err);
       expect(shown(safe)).not.toContain(FAKE_KEY);
-      let node: unknown = safe;
-      let depth = 0;
-      while (node instanceof Error && (node as { cause?: unknown }).cause !== undefined) {
-        node = (node as { cause?: unknown }).cause;
-        depth += 1;
-      }
-      expect(depth).toBe(6);
-      expect((node as Error).message).toContain('apikey=REDACTED');
+      expect(safe.message).toBe('level 5');
+      expect(safe.stack).toContain('innermost');
+      expect(safe.stack).toContain('apikey=REDACTED');
     });
 
-    it('handles a cyclic cause, keeping the cycle and the type', () => {
-      const outer = withCause(new TypeError(`outer ${keyed()}`), undefined);
-      const inner = withCause(new Error('inner'), outer);
-      withCause(outer, inner);
+    it('handles a cyclic cause and keeps the error type', () => {
+      const outer = new TypeError(`outer ${keyed()}`);
+      withCause(outer, withCause(new Error('inner'), outer));
 
-      const safe = redactOpenMeteoError(outer) as TypeError & { cause: Error & { cause: unknown } };
+      const safe = redactOpenMeteoError(outer) as Error;
       expect(safe).toBeInstanceOf(TypeError);
-      expect(safe.cause.cause).toBe(safe);
+      expect(safe.stack).toContain('[Circular]');
       expect(shown(safe)).not.toContain(FAKE_KEY);
     });
 
-    it('redacts AggregateError.errors and keeps the types', () => {
+    it('redacts AggregateError.errors and keeps the type', () => {
       const agg = new AggregateCtor([new RangeError(`one ${keyed()}`), `two ${keyed()}`], 'several');
-      const safe = redactOpenMeteoError(agg) as Aggregate;
+      const safe = redactOpenMeteoError(agg) as Error;
       expect(safe).toBeInstanceOf(AggregateCtor);
-      expect(safe.errors).toHaveLength(2);
-      expect(safe.errors[0]).toBeInstanceOf(RangeError);
+      expect(safe.stack).toContain('one');
+      expect(safe.stack).toContain('two');
       expect(shown(safe)).not.toContain(FAKE_KEY);
     });
 
-    it('redacts { cause: new Error(url) }, which JSON.stringify would have hidden', () => {
+    it('redacts { cause: new Error(url) }, which JSON.stringify alone would miss', () => {
       const input = { cause: new Error(`failed ${keyed()}`) };
-      expect(JSON.stringify(input)).not.toContain(FAKE_KEY); // why serialising was not enough
-      const safe = redactOpenMeteoError(input) as { cause: unknown };
+      expect(JSON.stringify(input)).not.toContain(FAKE_KEY);
+      const safe = redactOpenMeteoError(input);
       expect(safe).not.toBe(input);
-      expect(safe.cause).toBeInstanceOf(Error);
+      expect(safe).toBeInstanceOf(Error);
       expect(shown(safe)).not.toContain(FAKE_KEY);
     });
 
@@ -263,19 +258,82 @@ describe('openMeteoUrl', () => {
       });
       expect(() => JSON.stringify(cyclic)).toThrow();
 
-      const safe = redactOpenMeteoError(cyclic) as Record<string, unknown>;
+      const safe = redactOpenMeteoError(cyclic);
       expect(safe).not.toBe(cyclic);
-      expect(safe.self).toBe(safe);
-      expect(safe.boom).toBe('[unreadable]');
       expect(shown(safe)).not.toContain(FAKE_KEY);
     });
 
     it('redacts errors and strings inside arrays and objects, and class instances', () => {
       const input = [new TypeError(`a ${keyed()}`), { nested: [`b ${keyed()}`], at: new URL(keyed()) }];
-      const safe = redactOpenMeteoError(input) as [Error, { nested: string[]; at: unknown }];
-      expect(safe[0]).toBeInstanceOf(TypeError);
-      expect(typeof safe[1].at).toBe('string');
+      const safe = redactOpenMeteoError(input);
+      expect(safe).not.toBe(input);
       expect(shown(safe)).not.toContain(FAKE_KEY);
+    });
+
+    it('checks custom properties on an array, Map or Set inside a cause', () => {
+      const containers: object[] = [
+        Object.assign([1, 2], { extra: keyed() }),
+        Object.assign(new Map([['a', 1]]), { extra: keyed() }),
+        Object.assign(new Set([1]), { extra: keyed() }),
+      ];
+      for (const container of containers) {
+        const err = withCause(new Error('outer'), container);
+        expect(inspect(err, { depth: null })).toContain(FAKE_KEY); // what a logger would have printed
+        const safe = redactOpenMeteoError(err);
+        expect(safe).not.toBe(err);
+        expect(shown(safe)).not.toContain(FAKE_KEY);
+      }
+    });
+
+    it('checks symbol-keyed properties, enumerable or not', () => {
+      for (const enumerable of [true, false]) {
+        const err = new Error('plain message');
+        Object.defineProperty(err, Symbol('meta'), { value: keyed(), enumerable });
+        const safe = redactOpenMeteoError(err);
+        expect(safe).not.toBe(err);
+        expect(shown(safe)).not.toContain(FAKE_KEY);
+      }
+      const obj = { [Symbol('meta')]: keyed() };
+      const safeObj = redactOpenMeteoError(obj);
+      expect(safeObj).not.toBe(obj);
+      expect(shown(safeObj)).not.toContain(FAKE_KEY);
+    });
+
+    it('redacts a symbol whose description contains the key', () => {
+      const err = new Error('plain message');
+      Object.defineProperty(err, Symbol(`key ${FAKE_KEY}`), { value: 'v', enumerable: true });
+      for (const input of [err, { tag: Symbol(keyed()) }, Symbol(`bare ${FAKE_KEY}`)]) {
+        const safe = redactOpenMeteoError(input);
+        expect(safe).not.toBe(input);
+        expect(shown(safe)).not.toContain(FAKE_KEY);
+      }
+    });
+
+    it('redacts the key used as a property name, on errors, objects and Map keys', () => {
+      const inputs: object[] = [
+        Object.assign(new TypeError('plain message'), { [FAKE_KEY]: 1 }),
+        Object.assign(new Error('plain message'), { [`url_${FAKE_KEY}`]: 1 }),
+        { [FAKE_KEY]: 'v' },
+        new Map([[FAKE_KEY, 'v']]),
+      ];
+      for (const input of inputs) {
+        const safe = redactOpenMeteoError(input);
+        expect(safe).not.toBe(input);
+        expect(shown(safe)).not.toContain(FAKE_KEY);
+      }
+      expect(redactOpenMeteoError(inputs[0])).toBeInstanceOf(TypeError);
+    });
+
+    it('never passes through an inspect hook or a function property', () => {
+      const hooked = { [inspect.custom]: () => `secret ${FAKE_KEY}` };
+      expect(inspect(hooked)).toContain(FAKE_KEY); // what console.log would have printed
+      const safe = redactOpenMeteoError(hooked);
+      expect(safe).not.toBe(hooked);
+      expect(shown(safe)).not.toContain(FAKE_KEY);
+
+      const withFn = Object.assign(new Error('plain'), { toJSON: () => ({ url: keyed() }) });
+      expect(redactOpenMeteoError(withFn)).not.toBe(withFn);
+      expect(shown(redactOpenMeteoError(withFn))).not.toContain(FAKE_KEY);
     });
 
     it('never returns the unverified original, even when the chain exhausts the stack', () => {
@@ -288,14 +346,66 @@ describe('openMeteoUrl', () => {
         expect(safe).not.toBe(err);
         expect(safe).toBeInstanceOf(Error);
         expect((safe as Error).message).not.toContain(FAKE_KEY);
+        expect((safe as Error).stack).not.toContain(FAKE_KEY);
       } finally {
         Error.stackTraceLimit = limit;
       }
     });
 
     it('returns a clean nested structure as the same object', () => {
-      const clean = withCause(new Error('outer'), withCause(new Error('inner'), { code: 'ECONNRESET', list: [1, 'x'] }));
+      const clean = withCause(
+        new Error('outer'),
+        withCause(new Error('inner'), { code: 'ECONNRESET', list: [1, 'x'], [Symbol('ok')]: 1, map: new Map([['a', 1]]) })
+      );
       expect(redactOpenMeteoError(clean)).toBe(clean);
+    });
+  });
+
+  describe('bare and encoded apikey assignments', () => {
+    // A secret that is NOT the configured key, so only the apikey pattern can catch it.
+    const SECRET = 'customer-secret';
+    const shownAll = (value: unknown) =>
+      [inspect(value, { depth: null }), inspect(value, { depth: null, showHidden: true }), everything(value)].join('\n');
+
+    beforeEach(() => {
+      delete process.env.OPEN_METEO_API_KEY;
+    });
+
+    it('redacts apikey= at the start and after every separator', () => {
+      const separators = [' ', '"', "'", ',', ';', '(', '[', '{', '<', '\n', '\t', '?', '&', '=', ':', '|', '/', '_'];
+      const texts = [
+        `apikey=${SECRET}`,
+        `APIKEY=${SECRET}`,
+        `apikey="${SECRET}"`,
+        `apikey='${SECRET}'`,
+        ...separators.map((sep) => `failed${sep}apikey=${SECRET} tail`),
+      ];
+      for (const text of texts) {
+        const redacted = redactOpenMeteoApiKey(text);
+        expect(redacted).not.toContain(SECRET);
+        expect(redacted).toMatch(/apikey=["']?REDACTED/i);
+        expect(shownAll(redactOpenMeteoError(new Error(text)))).not.toContain(SECRET);
+      }
+    });
+
+    it('redacts URL-encoded apikey%3D and double-encoded apikey%253D', () => {
+      const url = `https://customer-api.open-meteo.com/v1/forecast?latitude=1&apikey=${SECRET}&hourly=x`;
+      const once = `next=${encodeURIComponent(url)}`;
+      const twice = encodeURIComponent(once);
+      for (const text of [once, twice, `apikey%3d${SECRET}`, `APIKEY%3D${SECRET}`]) {
+        expect(redactOpenMeteoApiKey(text)).not.toContain(SECRET);
+        expect(shownAll(redactOpenMeteoError(new Error(text)))).not.toContain(SECRET);
+      }
+      // The value stops at the encoded &, so the next parameter survives.
+      expect(redactOpenMeteoApiKey(once)).toContain('hourly%3Dx');
+    });
+
+    it('redacts the configured key in URL-encoded form too', () => {
+      const awkward = 'a/b+c=d';
+      const text = `x ${encodeURIComponent(awkward)} y ${awkward}`;
+      const redacted = redactOpenMeteoApiKey(text, awkward);
+      expect(redacted).not.toContain(encodeURIComponent(awkward));
+      expect(redacted).not.toContain(awkward);
     });
   });
 
