@@ -472,6 +472,12 @@ describe('openMeteoUrl', () => {
       expect((safe as DOMException).name).toBe('AbortError');
       expect(everything(safe)).not.toContain(key);
     });
+
+    it('redacts an assignment with whitespace around =, with no key configured', () => {
+      for (const text of ['apikey = customer-secret', 'apikey= customer-secret', 'APIKEY =customer-secret']) {
+        expect(redactOpenMeteoApiKey(text, null)).not.toContain('customer-secret');
+      }
+    });
   });
 
   describe('a caller-supplied apikey param', () => {
@@ -579,6 +585,18 @@ describe('openMeteoUrl', () => {
       expect(thrown).toBeInstanceOf(DOMException);
       expect((thrown as DOMException).name).toBe('AbortError');
       expect(everything(thrown)).not.toContain(FAKE_KEY);
+    });
+
+    it('monitoredFetch redacts a keyed request given as a URL from another realm', async () => {
+      const url = openMeteoUrl('forecast', '/v1/forecast', { latitude: 1 }).toString();
+      // Not instanceof URL, and no .url: only its string form says where it points.
+      const foreign = { href: url, toString: () => url } as unknown as URL;
+      global.fetch = jest.fn(async () => {
+        throw new TypeError(`Failed to parse URL from ${url}`);
+      }) as unknown as typeof fetch;
+      const thrown = await monitoredFetch('open-meteo', 'forecast', foreign).catch((e: unknown) => e);
+      expect(everything(thrown)).not.toContain(FAKE_KEY);
+      expect(JSON.stringify(weatherMetrics.snapshot())).not.toContain(FAKE_KEY);
     });
 
     it('the SDK marine path logs and records nothing that carries the key', async () => {

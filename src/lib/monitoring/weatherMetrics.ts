@@ -242,7 +242,14 @@ export async function monitoredFetch(
     // Errors with nothing to redact pass through as the same object. Only a request
     // that carried apikey is sanitised: NWS, Met.no and OpenWeather go through here
     // too, and their errors (an AbortError DOMException, say) must keep their type.
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    // Structural, not instanceof: a URL or Request from another realm fails instanceof.
+    // A Request has a string .url; anything else (a URL) stringifies to its href.
+    const url =
+      typeof input === 'string'
+        ? input
+        : typeof (input as { url?: unknown }).url === 'string'
+          ? (input as { url: string }).url
+          : String(input);
     const safe = /[?&]apikey(?:=|%3d)/i.test(url) ? redactOpenMeteoError(error) : error;
     span.failure(safe);
     throw safe;

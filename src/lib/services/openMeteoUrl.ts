@@ -159,7 +159,7 @@ export function openMeteoSdkRequest<P extends Record<string, unknown>>(
  * an encoded `&`. Over-redacting the tail of a message is acceptable; leaving part of
  * a key is not.
  */
-const APIKEY_ASSIGNMENT = /(^|[^a-z]|%(?:25)*[0-9a-f]{2})(apikey(?:=|%((?:25)*)3d|["']?\s*:\s*)["']?)((?:%[0-9a-f]{2}|[^%&#\s"'`\\<>,;()[\]{}])*)/gi;
+const APIKEY_ASSIGNMENT = /(^|[^a-z]|%(?:25)*[0-9a-f]{2})(apikey(?:\s*=\s*|%((?:25)*)3d|["']?\s*:\s*)["']?)((?:%[0-9a-f]{2}|[^%&#\s"'`\\<>,;()[\]{}])*)/gi;
 
 /**
  * Replace every apikey value. A bare or property value is the key whole, %26 and
