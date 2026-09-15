@@ -528,6 +528,14 @@ describe('openMeteoUrl', () => {
       expect(JSON.stringify(weatherMetrics.snapshot())).not.toContain(FAKE_KEY.slice(0, 6));
     });
 
+    it('redacts a keyed URL passed as the provider or endpoint label', () => {
+      const url = openMeteoUrl('forecast', '/v1/forecast', { latitude: 1 }).toString();
+      weatherMetrics.start(`open-meteo ${url}`, url).success({ status: 200 });
+      const snapshot = JSON.stringify(weatherMetrics.snapshot());
+      expect(snapshot).not.toContain(FAKE_KEY);
+      expect(snapshot).toContain('apikey=REDACTED');
+    });
+
     it('monitoredFetch records and rethrows a redacted error', async () => {
       const url = openMeteoUrl('forecast', '/v1/forecast', { latitude: 1 }).toString();
       global.fetch = jest.fn(async () => {

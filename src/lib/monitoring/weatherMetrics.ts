@@ -68,7 +68,11 @@ class WeatherMetrics {
   private providers = new Map<string, ProviderMetric>();
   private startedAt = Date.now();
 
-  start(provider: string, endpoint: string, note?: string) {
+  start(rawProvider: string, rawEndpoint: string, note?: string) {
+    // Labels are meant to be names, but they are stored and used as map keys, so a
+    // caller passing a keyed URL as one must not put the key into snapshot().
+    const provider = redactOpenMeteoApiKey(String(rawProvider));
+    const endpoint = redactOpenMeteoApiKey(String(rawEndpoint));
     const providerMetric = this.ensureProvider(provider);
     const endpointMetric = this.ensureEndpoint(providerMetric, endpoint);
     const ts = nowISO();
