@@ -108,6 +108,8 @@ export function openMeteoUrl(
   const url = new URL(baseUrl(api, path, key));
   for (const [name, value] of Object.entries(params)) {
     if (value === undefined || value === null) continue;
+    // One normalised key controls both the host and apikey: never forward a caller's.
+    if (name.toLowerCase() === 'apikey') continue;
     url.searchParams.set(name, Array.isArray(value) ? value.join(',') : String(value));
   }
   if (key) url.searchParams.set('apikey', key);
@@ -126,9 +128,13 @@ export function openMeteoSdkRequest<P extends Record<string, unknown>>(
   apiKey: string | null | undefined = getOpenMeteoApiKey()
 ): { url: string; params: P & { apikey?: string } } {
   const key = normaliseOpenMeteoApiKey(apiKey);
+  // One normalised key controls both the host and apikey: never forward a caller's.
+  const rest = Object.fromEntries(
+    Object.entries(params).filter(([name]) => name.toLowerCase() !== 'apikey')
+  ) as P;
   return {
     url: baseUrl(api, path, key),
-    params: key ? { ...params, apikey: key } : params,
+    params: key ? { ...rest, apikey: key } : rest,
   };
 }
 
@@ -154,18 +160,24 @@ export function redactOpenMeteoApiKey(text: string, apiKey: string | null | unde
 
 /** Redact with an ALREADY-normalised key. No default, for the same reason as hostFor(). */
 function redactText(text: string, key: string | undefined): string {
-  let redacted = text.replace(APIKEY_ASSIGNMENT, '$1$2REDACTED');
+  let redacted = text;
   if (key) {
+    // The exact key goes first. The generic assignment match below stops at an
+    // encoded &, so run first it would cut a key like `abc&def` (sent as abc%26def)
+    // in half and leave a tail the exact match could no longer find.
     // The key as written, as encodeURIComponent writes it, and as URLSearchParams
     // writes it into a request URL (openMeteoUrl above, and the SDK's own
     // `?${new URLSearchParams(params)}`): space as +, and different escapes for a
     // few punctuation characters. Longest first, so no variant is left half-done.
-    const variants = new Set([key, encodeURIComponent(key), new URLSearchParams({ k: key }).toString().slice(2)]);
+    // Each also encoded once more, as it appears inside an encoded URL (next=...).
+    const form = new URLSearchParams({ k: key }).toString().slice(2);
+    const once = [key, encodeURIComponent(key), form];
+    const variants = new Set([...once, ...once.map((v) => encodeURIComponent(v))]);
     for (const variant of [...variants].sort((a, b) => b.length - a.length)) {
       redacted = redacted.split(variant).join('REDACTED');
     }
   }
-  return redacted;
+  return redacted.replace(APIKEY_ASSIGNMENT, '$1$2REDACTED');
 }
 
 /** Built-in error types a redacted copy keeps. AggregateError is handled separately. */

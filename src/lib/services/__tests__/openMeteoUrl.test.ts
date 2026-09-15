@@ -420,6 +420,38 @@ describe('openMeteoUrl', () => {
         expect(redacted).toBe('failed near REDACTED while fetching');
       }
     });
+
+    it('leaves no part of a key containing &, plain or inside an encoded URL', () => {
+      // The request carries apikey=abc%26def; the generic match stops at %26.
+      const awkward = 'abc&def';
+      const url = openMeteoUrl('forecast', '/v1/forecast', { latitude: 1 }, awkward).toString();
+      const text = `fetch failed: ${url} (from next=${encodeURIComponent(url)}) raw ${awkward}`;
+      const redacted = redactOpenMeteoApiKey(text, awkward);
+      expect(redacted).not.toContain('abc');
+      expect(redacted).not.toContain('def');
+    });
+  });
+
+  describe('a caller-supplied apikey param', () => {
+    it('is never sent by openMeteoUrl, with or without a configured key', () => {
+      const params = { latitude: 1, apikey: 'caller', APIKey: 'caller2' };
+      const free = openMeteoUrl('forecast', '/v1/forecast', params, null);
+      expect(free.hostname).toBe('api.open-meteo.com');
+      expect(free.toString()).not.toMatch(/apikey|caller/i);
+
+      const keyed = openMeteoUrl('forecast', '/v1/forecast', params, 'k1');
+      expect(keyed.searchParams.getAll('apikey')).toEqual(['k1']);
+      expect(keyed.toString()).not.toContain('caller');
+    });
+
+    it('is never passed on in SDK params, with or without a configured key', () => {
+      const params: Record<string, unknown> = { latitude: 1, apikey: 'caller', APIKey: 'caller2' };
+      const free = openMeteoSdkRequest('forecast', '/v1/forecast', params, null);
+      expect(free.params).toEqual({ latitude: 1 });
+
+      const keyed = openMeteoSdkRequest('forecast', '/v1/forecast', params, 'k1');
+      expect(keyed.params).toEqual({ latitude: 1, apikey: 'k1' });
+    });
   });
 
   describe('weather metrics never store the key', () => {
@@ -462,6 +494,19 @@ describe('openMeteoUrl', () => {
         throw original;
       }) as unknown as typeof fetch;
       await expect(monitoredFetch('metno', 'x', 'https://example.test')).rejects.toBe(original);
+    });
+
+    it('monitoredFetch keeps an AbortError from a request with no apikey as it is', async () => {
+      // NWS, Met.no and OpenWeather share this wrapper; cancellation must stay an AbortError.
+      const abort = new DOMException('The operation was aborted.', 'AbortError');
+      global.fetch = jest.fn(async () => {
+        throw abort;
+      }) as unknown as typeof fetch;
+      const thrown = await monitoredFetch('nws', 'points', new URL('https://api.weather.gov/points/1,1')).catch(
+        (e: unknown) => e
+      );
+      expect(thrown).toBe(abort);
+      expect((thrown as DOMException).name).toBe('AbortError');
     });
 
     it('the SDK marine path logs and records nothing that carries the key', async () => {
