@@ -1,3 +1,4 @@
+import { inspect } from 'util';
 import {
   getOpenMeteoApiKey,
   normaliseOpenMeteoApiKey,
@@ -10,10 +11,12 @@ import {
 import { monitoredFetch, weatherMetrics } from '../../monitoring/weatherMetrics';
 
 /** Everything a logger or serialiser could show for a value, as one string. */
-const everything = (value: unknown): string => {
+const everything = (value: unknown, seen: Set<unknown> = new Set()): string => {
   if (value instanceof Error) {
+    if (seen.has(value)) return '[cycle]';
+    seen.add(value);
     const cause = (value as Error & { cause?: unknown }).cause;
-    return [value.name, value.message, value.stack ?? '', cause === undefined ? '' : everything(cause)].join('\n');
+    return [value.name, value.message, value.stack ?? '', cause === undefined ? '' : everything(cause, seen)].join('\n');
   }
   try {
     return typeof value === 'string' ? value : JSON.stringify(value) ?? String(value);
@@ -184,6 +187,115 @@ describe('openMeteoUrl', () => {
       process.env.OPEN_METEO_API_KEY = FAKE_KEY;
       expect(everything(redactOpenMeteoError(`x ${keyedUrl()}`))).not.toContain(FAKE_KEY);
       expect(everything(redactOpenMeteoError({ url: keyedUrl() }))).not.toContain(FAKE_KEY);
+    });
+  });
+
+  describe('redactOpenMeteoError walks the whole structure', () => {
+    const keyed = () => openMeteoUrl('forecast', '/v1/forecast', { latitude: 1 }, FAKE_KEY).toString();
+    /** What a logger would print (util.inspect, which follows cause/errors) plus a serialised view. */
+    const shown = (value: unknown) => `${inspect(value, { depth: null })}\n${everything(value)}`;
+    const withCause = <E extends Error>(err: E, cause: unknown): E => {
+      Object.defineProperty(err, 'cause', { value: cause, writable: true, configurable: true, enumerable: false });
+      return err;
+    };
+    type Aggregate = Error & { errors: unknown[] };
+    const AggregateCtor = (globalThis as unknown as {
+      AggregateError: new (errors: unknown[], message?: string) => Aggregate;
+    }).AggregateError;
+
+    beforeEach(() => {
+      process.env.OPEN_METEO_API_KEY = FAKE_KEY;
+    });
+
+    it('redacts causes deeper than three levels and keeps the whole chain', () => {
+      let err: Error = new Error(`innermost ${keyed()}`);
+      for (let i = 0; i < 6; i++) err = withCause(new Error(`level ${i}`), err);
+
+      const safe = redactOpenMeteoError(err);
+      expect(shown(safe)).not.toContain(FAKE_KEY);
+      let node: unknown = safe;
+      let depth = 0;
+      while (node instanceof Error && (node as { cause?: unknown }).cause !== undefined) {
+        node = (node as { cause?: unknown }).cause;
+        depth += 1;
+      }
+      expect(depth).toBe(6);
+      expect((node as Error).message).toContain('apikey=REDACTED');
+    });
+
+    it('handles a cyclic cause, keeping the cycle and the type', () => {
+      const outer = withCause(new TypeError(`outer ${keyed()}`), undefined);
+      const inner = withCause(new Error('inner'), outer);
+      withCause(outer, inner);
+
+      const safe = redactOpenMeteoError(outer) as TypeError & { cause: Error & { cause: unknown } };
+      expect(safe).toBeInstanceOf(TypeError);
+      expect(safe.cause.cause).toBe(safe);
+      expect(shown(safe)).not.toContain(FAKE_KEY);
+    });
+
+    it('redacts AggregateError.errors and keeps the types', () => {
+      const agg = new AggregateCtor([new RangeError(`one ${keyed()}`), `two ${keyed()}`], 'several');
+      const safe = redactOpenMeteoError(agg) as Aggregate;
+      expect(safe).toBeInstanceOf(AggregateCtor);
+      expect(safe.errors).toHaveLength(2);
+      expect(safe.errors[0]).toBeInstanceOf(RangeError);
+      expect(shown(safe)).not.toContain(FAKE_KEY);
+    });
+
+    it('redacts { cause: new Error(url) }, which JSON.stringify would have hidden', () => {
+      const input = { cause: new Error(`failed ${keyed()}`) };
+      expect(JSON.stringify(input)).not.toContain(FAKE_KEY); // why serialising was not enough
+      const safe = redactOpenMeteoError(input) as { cause: unknown };
+      expect(safe).not.toBe(input);
+      expect(safe.cause).toBeInstanceOf(Error);
+      expect(shown(safe)).not.toContain(FAKE_KEY);
+    });
+
+    it('redacts an unserialisable object instead of returning it', () => {
+      const cyclic: Record<string, unknown> = { url: keyed() };
+      cyclic.self = cyclic;
+      Object.defineProperty(cyclic, 'boom', {
+        enumerable: true,
+        get() {
+          throw new Error('getter');
+        },
+      });
+      expect(() => JSON.stringify(cyclic)).toThrow();
+
+      const safe = redactOpenMeteoError(cyclic) as Record<string, unknown>;
+      expect(safe).not.toBe(cyclic);
+      expect(safe.self).toBe(safe);
+      expect(safe.boom).toBe('[unreadable]');
+      expect(shown(safe)).not.toContain(FAKE_KEY);
+    });
+
+    it('redacts errors and strings inside arrays and objects, and class instances', () => {
+      const input = [new TypeError(`a ${keyed()}`), { nested: [`b ${keyed()}`], at: new URL(keyed()) }];
+      const safe = redactOpenMeteoError(input) as [Error, { nested: string[]; at: unknown }];
+      expect(safe[0]).toBeInstanceOf(TypeError);
+      expect(typeof safe[1].at).toBe('string');
+      expect(shown(safe)).not.toContain(FAKE_KEY);
+    });
+
+    it('never returns the unverified original, even when the chain exhausts the stack', () => {
+      const limit = Error.stackTraceLimit;
+      Error.stackTraceLimit = 0;
+      try {
+        let err: Error = new Error(`deep ${keyed()}`);
+        for (let i = 0; i < 100_000; i++) err = withCause(new Error('wrap'), err);
+        const safe = redactOpenMeteoError(err);
+        expect(safe).not.toBe(err);
+        expect(safe).toBeInstanceOf(Error);
+        expect((safe as Error).message).not.toContain(FAKE_KEY);
+      } finally {
+        Error.stackTraceLimit = limit;
+      }
+    });
+
+    it('returns a clean nested structure as the same object', () => {
+      const clean = withCause(new Error('outer'), withCause(new Error('inner'), { code: 'ECONNRESET', list: [1, 'x'] }));
+      expect(redactOpenMeteoError(clean)).toBe(clean);
     });
   });
 
