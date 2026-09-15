@@ -1,5 +1,6 @@
 import { fetchWeatherApi } from 'openmeteo';
 import { monitoredFetch, weatherMetrics } from '../monitoring/weatherMetrics';
+import { openMeteoSdkRequest, openMeteoUrl, redactOpenMeteoApiKey } from './openMeteoUrl';
 import {
   round3dp as round3dpUtil,
   round1dp,
@@ -447,7 +448,8 @@ async function fetchOpenMeteoMarineSeries(
       forecast_days: 7,
     };
 
-    const responses = await fetchWeatherApi('https://marine-api.open-meteo.com/v1/marine', params);
+    const request = openMeteoSdkRequest('marine', '/v1/marine', params);
+    const responses = await fetchWeatherApi(request.url, request.params);
     const response = responses?.[0];
     if (!response) {
       span.failure(new Error('Empty Open-Meteo marine response'));
@@ -567,7 +569,7 @@ async function fetchOpenMeteoMarineSeries(
     return { hours: limited, firstHour } satisfies OpenMeteoMarineSeriesResult;
   } catch (error) {
     span.failure(error);
-    console.warn('Open-Meteo marine fetch failed', error);
+    console.warn('Open-Meteo marine fetch failed', redactOpenMeteoApiKey(error instanceof Error ? error.message : String(error)));
     return null;
   }
 }
@@ -887,7 +889,7 @@ async function fetchFromOpenMeteoWeather(lat: number, lon: number): Promise<Full
       timezone: 'auto',
     });
     
-    const url = `https://api.open-meteo.com/v1/forecast?${params}`;
+    const url = openMeteoUrl('forecast', '/v1/forecast', Object.fromEntries(params)).toString();
     const response = await monitoredFetch('openmeteo', 'forecast', url);
     
     if (!response.ok) {
@@ -1751,7 +1753,7 @@ export async function fetchOpenMeteoWeather(lat: number, lon: number, startDate:
     throw new Error(`Open-Meteo API ERROR: Date range exceeds 5 days (${diffDays} days requested). Limit requests to 5 days or less.`);
   }
   
-  const url = new URL('https://api.open-meteo.com/v1/forecast');
+  const url = openMeteoUrl('forecast', '/v1/forecast');
   url.searchParams.set('latitude', String(lat));
   url.searchParams.set('longitude', String(lon));
   url.searchParams.set('timezone', 'auto');
@@ -1792,7 +1794,7 @@ export async function fetchOpenMeteoWeather(lat: number, lon: number, startDate:
     if (!response.ok) throw { status: response.status, data };
     return data;
   } catch (err) {
-    throw new Error('Open-Meteo weather fetch failed: ' + (err instanceof Error ? err.message : String(err)));
+    throw new Error('Open-Meteo weather fetch failed: ' + redactOpenMeteoApiKey(err instanceof Error ? err.message : String(err)));
   }
 }
 
@@ -1818,7 +1820,7 @@ async function fetchOpenMeteoAirPollen(lat: number, lon: number, startDate: stri
     throw new Error(`Open-Meteo API ERROR: Date range exceeds 5 days (${diffDays} days requested). Limit requests to 5 days or less.`);
   }
   
-  const url = new URL('https://air-quality-api.open-meteo.com/v1/air-quality');
+  const url = openMeteoUrl('airQuality', '/v1/air-quality');
   url.searchParams.set('latitude', String(lat));
   url.searchParams.set('longitude', String(lon));
   url.searchParams.set('timezone', 'auto');
@@ -1859,12 +1861,13 @@ async function fetchOpenMeteoAirPollen(lat: number, lon: number, startDate: stri
       const details = {
         status: errorObj.status,
         statusText: errorObj.statusText,
-        url: errorObj.url,
+        // The URL carries apikey when the customer API is configured.
+        url: redactOpenMeteoApiKey(errorObj.url),
         data: errorObj.data,
       };
       throw new Error('Open-Meteo air/pollen fetch failed: ' + JSON.stringify(details));
     }
-    throw new Error('Open-Meteo air/pollen fetch failed: ' + (err instanceof Error ? err.message : String(err)));
+    throw new Error('Open-Meteo air/pollen fetch failed: ' + redactOpenMeteoApiKey(err instanceof Error ? err.message : String(err)));
   }
 }
 

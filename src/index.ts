@@ -64,6 +64,9 @@ export { getWeatherMessage } from './lib/utils/weatherMessages';
 // Weather services
 export { fetchMetNoLocationForecast, fetchMetNoMarineSeries, fetchOpenMeteoMarineSeries, fetchWorldTides, getFullWeather, fetchOpenMeteoAirPollen, fetchMetNoOceanForecast, fetchStormglassMarine, fetchStormglassTides, fetchStormglassAstronomy, fetchStormglassBio, fetchOpenMeteoWeather, fetchMarineForUserSpots, getAirPollution } from './lib/services/weatherService';
 export type { WorldTidesResponse } from './lib/services/weatherService';
+// Open-Meteo request URLs: customer API when OPEN_METEO_API_KEY is set, free API otherwise
+export { openMeteoUrl, openMeteoSdkRequest, openMeteoHost, getOpenMeteoApiKey, redactOpenMeteoApiKey } from './lib/services/openMeteoUrl';
+export type { OpenMeteoApi, OpenMeteoParamValue } from './lib/services/openMeteoUrl';
 // Rectangle anchor utilities (ICES grid caching for marine/tide data)
 export { buildRectangleCacheKey, getRectangleAnchorForLocation, getRectangleDayKey } from './lib/weather/rectangleAnchors';
 export type { RectangleAnchor, IcesRectangleRow } from './lib/weather/rectangleAnchors';

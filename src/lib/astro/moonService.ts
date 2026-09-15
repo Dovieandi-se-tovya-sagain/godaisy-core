@@ -2,6 +2,7 @@ import { Temporal } from '@js-temporal/polyfill';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseServerClient } from '../supabase/serverClient';
 import { round0dp } from '../utils/coordinates';
+import { openMeteoUrl, redactOpenMeteoApiKey } from '../services/openMeteoUrl';
 import suncalc from 'suncalc';
 const { getMoonTimes, getTimes, getMoonIllumination } = suncalc;
 
@@ -400,7 +401,7 @@ async function fetchFromOpenMeteo(lat: number, lon: number, date: string): Promi
     const rlon = round0dp(lon);
     
     // Open-Meteo forecast API has sunrise/sunset
-    const url = new URL('https://api.open-meteo.com/v1/forecast');
+    const url = openMeteoUrl('forecast', '/v1/forecast');
     url.searchParams.set('latitude', String(rlat));
     url.searchParams.set('longitude', String(rlon));
     url.searchParams.set('daily', 'sunrise,sunset');
@@ -449,7 +450,7 @@ async function fetchFromOpenMeteo(lat: number, lon: number, date: string): Promi
     console.log('✅ Open-Meteo + SunCalc: Astronomy data found');
     return result;
   } catch (error) {
-    console.error('❌ Open-Meteo error:', error);
+    console.error('❌ Open-Meteo error:', redactOpenMeteoApiKey(error instanceof Error ? error.message : String(error)));
     return null;
   }
 }

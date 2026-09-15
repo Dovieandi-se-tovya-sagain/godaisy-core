@@ -46,6 +46,9 @@ jobs:
           # dataSource === 'stormglass' which a MET run never is. That is why
           # next_high_tide_iso was null in all 7,000 rows from 2026-07-17.
           WORLDTIDES_API_KEY: ${{ secrets.WORLDTIDES_API_KEY }}
+          # Open-Meteo customer API. Unset or empty -> the free hosts, as before.
+          # Read only by src/lib/services/openMeteoUrl.ts; never echo it.
+          OPEN_METEO_API_KEY: ${{ secrets.OPEN_METEO_API_KEY }}
           FINDR_MET_ONLY: '1'
           FINDR_MET_SIMPLE_PROBES: '1'
           FINDR_CONDITIONS_DELAY_MS: '250'
