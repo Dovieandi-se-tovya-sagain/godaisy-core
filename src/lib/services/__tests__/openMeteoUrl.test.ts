@@ -430,6 +430,48 @@ describe('openMeteoUrl', () => {
       expect(redacted).not.toContain('abc');
       expect(redacted).not.toContain('def');
     });
+
+    it('redacts an apikey that is the first parameter of an encoded URL', () => {
+      // %3Fapikey: the character before apikey is the F of the encoded ?.
+      const url = 'https://customer-api.open-meteo.com/v1/forecast?apikey=s3cr3tv4lue&latitude=1';
+      const once = encodeURIComponent(url);
+      for (const text of [once, encodeURIComponent(once)]) {
+        const redacted = redactOpenMeteoApiKey(text, null);
+        expect(redacted).not.toContain('s3cr3tv4lue');
+        expect(redacted).toContain('latitude');
+      }
+    });
+
+    it('redacts an apikey written as a property: JSON, inspected or plain', () => {
+      for (const text of ['{"apikey":"s3cr3tv4lue"}', "{ apikey: 's3cr3tv4lue' }", 'apikey : s3cr3tv4lue']) {
+        expect(redactOpenMeteoApiKey(text, null)).not.toContain('s3cr3tv4lue');
+      }
+    });
+
+    it('sanitises an object carrying an apikey property, with no key configured', () => {
+      delete process.env.OPEN_METEO_API_KEY;
+      const safe = redactOpenMeteoError({ apikey: 's3cr3tv4lue' });
+      expect(everything(safe)).not.toContain('s3cr3tv4lue');
+    });
+
+    it('redacts a whole bare value, %26 and all, with no key configured', () => {
+      expect(redactOpenMeteoApiKey('GET /v1/forecast?apikey=abc%26def&latitude=1', null)).toBe(
+        'GET /v1/forecast?apikey=REDACTED&latitude=1'
+      );
+      // Encoded once, the key's own & is %2526 and the separator %26.
+      const once = encodeURIComponent('https://x.test/v1/forecast?apikey=abc%26def&latitude=1');
+      const redacted = redactOpenMeteoApiKey(once, null);
+      expect(redacted).not.toContain('def');
+      expect(redacted).toContain('latitude');
+    });
+
+    it('keeps a DOMException a DOMException of the same name, redacting its message', () => {
+      const key = 'k3y-for-dom';
+      const safe = redactOpenMeteoError(new DOMException(`aborted apikey=${key}`, 'AbortError'), key);
+      expect(safe).toBeInstanceOf(DOMException);
+      expect((safe as DOMException).name).toBe('AbortError');
+      expect(everything(safe)).not.toContain(key);
+    });
   });
 
   describe('a caller-supplied apikey param', () => {
@@ -507,6 +549,17 @@ describe('openMeteoUrl', () => {
       );
       expect(thrown).toBe(abort);
       expect((thrown as DOMException).name).toBe('AbortError');
+    });
+
+    it('monitoredFetch keeps an AbortError from a keyed request an AbortError', async () => {
+      const url = openMeteoUrl('forecast', '/v1/forecast', { latitude: 1 }).toString();
+      global.fetch = jest.fn(async () => {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      }) as unknown as typeof fetch;
+      const thrown = await monitoredFetch('open-meteo', 'forecast', url).catch((e: unknown) => e);
+      expect(thrown).toBeInstanceOf(DOMException);
+      expect((thrown as DOMException).name).toBe('AbortError');
+      expect(everything(thrown)).not.toContain(FAKE_KEY);
     });
 
     it('the SDK marine path logs and records nothing that carries the key', async () => {
