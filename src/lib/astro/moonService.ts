@@ -2,6 +2,7 @@ import { Temporal } from '@js-temporal/polyfill';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseServerClient } from '../supabase/serverClient';
 import { round0dp } from '../utils/coordinates';
+import { openMeteoUrl, redactOpenMeteoError } from '../services/openMeteoUrl';
 import suncalc from 'suncalc';
 const { getMoonTimes, getTimes, getMoonIllumination } = suncalc;
 
@@ -390,8 +391,9 @@ function computeExpiryIso(localDate: string, timeZone: string): string {
 }
 
 /**
- * Fetch astronomy data from Open-Meteo (FREE, no API key required)
- * Primary data source for sun data; moon data comes from SunCalc
+ * Fetch astronomy data from Open-Meteo. Free API by default (no key needed); the
+ * paid customer API (customer-api.open-meteo.com + apikey) when OPEN_METEO_API_KEY
+ * is set. Primary data source for sun data; moon data comes from SunCalc
  */
 async function fetchFromOpenMeteo(lat: number, lon: number, date: string): Promise<IpGeoAstronomyResponse | null> {
   try {
@@ -400,7 +402,7 @@ async function fetchFromOpenMeteo(lat: number, lon: number, date: string): Promi
     const rlon = round0dp(lon);
     
     // Open-Meteo forecast API has sunrise/sunset
-    const url = new URL('https://api.open-meteo.com/v1/forecast');
+    const url = openMeteoUrl('forecast', '/v1/forecast');
     url.searchParams.set('latitude', String(rlat));
     url.searchParams.set('longitude', String(rlon));
     url.searchParams.set('daily', 'sunrise,sunset');
@@ -449,7 +451,7 @@ async function fetchFromOpenMeteo(lat: number, lon: number, date: string): Promi
     console.log('✅ Open-Meteo + SunCalc: Astronomy data found');
     return result;
   } catch (error) {
-    console.error('❌ Open-Meteo error:', error);
+    console.error('❌ Open-Meteo error:', redactOpenMeteoError(error));
     return null;
   }
 }
@@ -586,7 +588,7 @@ export async function getMoonSunData(params: FetchParams): Promise<MoonSunData> 
   let live: IpGeoAstronomyResponse | null = null;
   let source = 'unknown';
 
-  // 2. Try Open-Meteo (FREE, no API key required)
+  // 2. Try Open-Meteo (free API by default; customer API when OPEN_METEO_API_KEY is set)
   live = await fetchFromOpenMeteo(params.lat, params.lon, previewDate);
   if (live) {
     source = 'openmeteo';

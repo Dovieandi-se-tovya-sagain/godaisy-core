@@ -1,3 +1,5 @@
+import { redactOpenMeteoApiKey, redactOpenMeteoError } from '../services/openMeteoUrl';
+
 type OutcomeDetails = {
   status?: number;
   note?: string;
@@ -55,14 +57,22 @@ export type WeatherMetricsSnapshot = {
 };
 
 const nowISO = () => new Date().toISOString();
+// Everything stored here ends up in snapshot(), so redact Open-Meteo keys on the way
+// in, for every provider and every caller -- before truncating, so a cut can never
+// leave part of a key behind. A no-op for text without an apikey in it.
 const clampError = (value: unknown, max = 500) =>
-  String(value instanceof Error ? value.message : value ?? 'Unknown error').slice(0, max);
+  redactOpenMeteoApiKey(String(value instanceof Error ? value.message : value ?? 'Unknown error')).slice(0, max);
+const safeNote = (note: string | undefined) => (note === undefined ? undefined : redactOpenMeteoApiKey(note));
 
 class WeatherMetrics {
   private providers = new Map<string, ProviderMetric>();
   private startedAt = Date.now();
 
-  start(provider: string, endpoint: string, note?: string) {
+  start(rawProvider: string, rawEndpoint: string, note?: string) {
+    // Labels are meant to be names, but they are stored and used as map keys, so a
+    // caller passing a keyed URL as one must not put the key into snapshot().
+    const provider = redactOpenMeteoApiKey(String(rawProvider));
+    const endpoint = redactOpenMeteoApiKey(String(rawEndpoint));
     const providerMetric = this.ensureProvider(provider);
     const endpointMetric = this.ensureEndpoint(providerMetric, endpoint);
     const ts = nowISO();
@@ -70,7 +80,7 @@ class WeatherMetrics {
     providerMetric.requests += 1;
     providerMetric.lastRequestAt = ts;
     providerMetric.lastEndpoint = endpoint;
-    providerMetric.lastNote = note;
+    providerMetric.lastNote = safeNote(note);
 
     endpointMetric.requests += 1;
     endpointMetric.lastRequestAt = ts;
@@ -227,7 +237,24 @@ export async function monitoredFetch(
     }
     return response;
   } catch (error) {
-    span.failure(error);
-    throw error;
+    // Open-Meteo customer URLs carry apikey, and a fetch exception can quote its URL
+    // (a parse failure does, in message and stack). Callers get the redacted error too.
+    // Errors with nothing to redact pass through as the same object. Only a request
+    // that carried apikey is sanitised: NWS, Met.no and OpenWeather go through here
+    // too, and their errors (an AbortError DOMException, say) must keep their type.
+    // Structural, not instanceof: a URL or Request from another realm fails instanceof.
+    // A URL has a string .href and a Request a string .url; String() is the last resort
+    // only, since a URL's toString can be replaced.
+    const url =
+      typeof input === 'string'
+        ? input
+        : typeof (input as { href?: unknown }).href === 'string'
+          ? (input as { href: string }).href
+          : typeof (input as { url?: unknown }).url === 'string'
+            ? (input as { url: string }).url
+            : String(input);
+    const safe = /[?&]apikey(?:=|%3d)/i.test(url) ? redactOpenMeteoError(error) : error;
+    span.failure(safe);
+    throw safe;
   }
 }
