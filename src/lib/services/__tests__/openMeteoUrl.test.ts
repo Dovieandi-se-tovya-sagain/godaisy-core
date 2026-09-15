@@ -587,6 +587,17 @@ describe('openMeteoUrl', () => {
       expect(everything(thrown)).not.toContain(FAKE_KEY);
     });
 
+    it('monitoredFetch reads a URL by its href, even if its toString has been replaced', async () => {
+      const url = openMeteoUrl('forecast', '/v1/forecast', { latitude: 1 });
+      url.toString = () => 'https://example.test/';
+      global.fetch = jest.fn(async () => {
+        throw new TypeError(`Failed to parse URL from ${url.href}`);
+      }) as unknown as typeof fetch;
+      const thrown = await monitoredFetch('open-meteo', 'forecast', url).catch((e: unknown) => e);
+      expect(everything(thrown)).not.toContain(FAKE_KEY);
+      expect(JSON.stringify(weatherMetrics.snapshot())).not.toContain(FAKE_KEY);
+    });
+
     it('monitoredFetch redacts a keyed request given as a URL from another realm', async () => {
       const url = openMeteoUrl('forecast', '/v1/forecast', { latitude: 1 }).toString();
       // Not instanceof URL, and no .url: only its string form says where it points.
