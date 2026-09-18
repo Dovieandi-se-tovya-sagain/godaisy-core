@@ -244,6 +244,30 @@ export class RealCopernicusProvider implements CopernicusProvider {
   private region?: string;
   private datasetConfig?: CopernicusDatasetConfig;
 
+  // Circuit breaker for the BGC dataset family (bio, nutrients, carbonate,
+  // PFT, plankton). When CMEMS's BGC worker is unavailable for a region,
+  // every cell was independently retrying all 5 BGC datasets (2 date
+  // fallbacks each, 90-120s worker timeout per attempt) — up to ~17 minutes
+  // of pure timeout-waiting per cell, multiplied across hundreds of cells,
+  // which is what caused multi-hour ingestion job hangs (see godaisy-core
+  // incident: BAL/MED/GLO_AM/GLO_AP regions cancelled after hitting the
+  // 6h GitHub Actions job timeout).
+  //
+  // The ingestion script processes cells in parallel batches (Promise.all,
+  // BATCH_SIZE cells at a time, all sharing this cached provider instance —
+  // see providerCache in ingest-copernicus-data.ts), so a strict
+  // "consecutive failures" counter isn't safe: completion order across a
+  // batch is nondeterministic, and a handful of unlucky early completions
+  // could trip the breaker even while other in-flight cells in the same
+  // batch go on to succeed. Instead this tracks a sliding window of the
+  // most recent outcomes and opens the circuit only once a clear majority
+  // within that window failed — tolerant of a few flukes, still responsive
+  // once a region's BGC worker is genuinely down.
+  private static readonly BGC_WINDOW_SIZE = 6;
+  private static readonly BGC_FAILURE_THRESHOLD = 5; // 5 of last 6 → open
+  private bgcRecentOutcomes: boolean[] = []; // true = had data, false = failed
+  private bgcCircuitOpen = false;
+
   constructor(region?: string) {
     this.region = region;
 
@@ -276,6 +300,36 @@ export class RealCopernicusProvider implements CopernicusProvider {
       const temperatureDataset = this.datasetConfig?.physics || 'cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m';
       const salinityDataset = this.datasetConfig?.salinity || 'cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m';
       const currentsDataset = this.datasetConfig?.currents || 'cmems_mod_glo_phy-cur_anfc_0.083deg_P1D-m';
+      // Sea-bed temperature. Demersal species live at the bottom, so in a stratified
+      // summer column the surface reading is not the water they occupy. This is always
+      // requested as an extra variable on a call we already make, never as its own
+      // fetch — which product carries it, and under which name, is routed per region
+      // (see `bottomTemperature` in regionRouter). Requesting it from a product that
+      // lacks it fails that whole call, so regions where it was not confirmed present
+      // leave the config unset and simply keep the variable lists they had.
+      //
+      // The no-config case is not an edge case, it is the majority: getProvider passes
+      // undefined for every GLO_AM / GLO_AP / GLO_AF cell (3,568 of the 7,649 in
+      // grid_conditions_latest), so datasetConfig is unset and the hardcoded defaults
+      // above apply — which ARE the GLO datasets. Route bottom temperature the same way
+      // GLO does, or the largest group of cells silently gets nothing. A config that
+      // exists but omits bottomTemperature is a deliberate "not available in this
+      // region" and is left alone.
+      const bottomTemp = this.datasetConfig
+        ? this.datasetConfig.bottomTemperature
+        : { source: 'mixedLayerDepth' as const, variable: 'tob' as const };
+      const temperatureVariables = bottomTemp?.source === 'physics'
+        ? ['thetao', bottomTemp.variable]
+        : ['thetao'];
+      // Narrowed to ['thetao'] if the physics product turns out not to carry the bottom-temperature
+      // variable. Same protection as the MLD path below, and it matters more here: temperature is
+      // the term the whole score is built on, so losing a physics call to a variable we merely
+      // hoped for would be the single most damaging silent failure in this pipeline.
+      let tempVarsInUse = temperatureVariables;
+      const mldVariables = bottomTemp?.source === 'mixedLayerDepth'
+        ? ['mlotst', bottomTemp.variable]
+        : ['mlotst'];
+
       const bioDataset = this.datasetConfig?.biogeochemistry || 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m';
       // Pass [] to let CMEMS return all variables the dataset has.
       // Global bgc-bio only has o2+nppv; nutrients (no3,po4,si,fe) are in bgc-nut,
@@ -294,6 +348,38 @@ export class RealCopernicusProvider implements CopernicusProvider {
       // older data would already have been fetched by a previous run.
       // Dynamic data (currents/waves): max 1 day back
       const stableDateFallbacks = [0, 1]; // days back for stable data
+
+      // Satellite optical products need a much wider window than model output.
+      //
+      // Kd490 comes from a daily L3 ocean-colour feed, and cloud decides whether
+      // a given pixel has a retrieval that day. Probed 2026-08-10 against the
+      // live datasets: the same 0.5-degree window swings from 0% to 95% valid
+      // pixels depending on the day. One control cell in the NWS region holds a
+      // stored value of 0.1203 yet returned 0 of 43,776 valid pixels when
+      // re-requested.
+      //
+      // With only [0, 1] a cell needed today or yesterday to be clear over that
+      // exact spot. A null never overwrites a stored value, so coverage is
+      // cumulative: whether a cell has ever caught a clear day, not whether it
+      // caught one today. That, not configuration, produced the coverage split
+      // measured the same day at equal latitude:
+      //
+      //     copernicus-NWS  747 cells  99.6%     copernicus-GLO  223 cells  ~43%
+      //     copernicus-BAL  413 cells  99.0%     copernicus-MED   89 cells  42.7%
+      //
+      // NWS and BAL have simply banked more clear days. The regions are not
+      // configured differently in any way that matters -- MED is a correctly
+      // configured regional 1km L3 product sitting at half of NWS.
+      //
+      // A week is well within this feed's normal latency, and each extra offset
+      // only costs a request when the earlier ones found nothing: the loop
+      // breaks on the first success, so a clear cell still costs exactly one.
+      //
+      // Deliberately NOT applied to the model fetches (temperature, MLD, BGC,
+      // nutrients, carbonate, PFT, plankton, waves). Those are gridded model
+      // output where a miss usually means land, not cloud, so retrying six more
+      // days would multiply requests for no gain.
+      const satelliteDateFallbacks = [0, 1, 2, 3, 5, 7];
       const dynamicDateFallbacks = [0, 1]; // days back for dynamic data
       let successfulDate: string = start;
       let daysBack = 0;
@@ -324,7 +410,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
           try {
             temperatureData = await this.fetchAndParse(
               temperatureDataset,
-              ['thetao'],
+              tempVarsInUse,  // thetao, plus `bottomT` where the product carries it
               lat, lon,
               fallbackDateStr, fallbackDateStr,
               padding
@@ -338,6 +424,37 @@ export class RealCopernicusProvider implements CopernicusProvider {
             }
             temperatureData = null;
           } catch (err) {
+            // Surface temperature must never be lost to a bottom-temperature variable the product
+            // does not have. thetao drives the dominant scoring term; `bottomT` is an extra we ask
+            // for on the same call. If the product rejects the extra, drop it and keep the reading
+            // that matters, rather than failing the cell.
+            if (err instanceof Error &&
+                err.message.startsWith('VARIABLE_NOT_FOUND:') &&
+                tempVarsInUse.length > 1) {
+              const dropped = tempVarsInUse.slice(1).join(', ');
+              console.warn(`   ⚠️  ${temperatureDataset} has no '${dropped}' — retrying temperature without it`);
+              tempVarsInUse = ['thetao'];
+              try {
+                temperatureData = await this.fetchAndParse(
+                  temperatureDataset,
+                  tempVarsInUse,
+                  lat, lon,
+                  fallbackDateStr, fallbackDateStr,
+                  padding
+                );
+                if (temperatureData && this.hasValidData(temperatureData)) {
+                  daysBack = dayOffset;
+                  successfulDate = fallbackDateStr;
+                  const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
+                  console.log(`   ✅ Temperature found without '${dropped}' at ${padding}° padding${ageNote}`);
+                  break;
+                }
+                temperatureData = null;
+              } catch {
+                // Narrowed request failed too; remaining paddings and dates use the shorter list.
+              }
+              continue;
+            }
             const isTimeout = err instanceof Error && err.message.includes('timeout');
             const errorType = isTimeout ? '⏱️  Timeout' : '❌ Error';
             const isLastAttempt = dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1] &&
@@ -416,6 +533,10 @@ export class RealCopernicusProvider implements CopernicusProvider {
       // Try mixed layer depth (mlotst) - 2D variable from separate physics dataset
       // MLD is stable over days (like BGC), so use stableDateFallbacks
       const mldDataset = this.datasetConfig?.mixedLayerDepth || 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m';
+      // Narrowed to ['mlotst'] the first time a dataset rejects the bottom-temperature variable.
+      // Held outside both loops so that discovery is made once per cell, rather than re-attempting
+      // a request already known to be impossible on every remaining padding and date.
+      let mldVarsInUse = mldVariables;
       for (const dayOffset of stableDateFallbacks) {
         if (mldData) break;
 
@@ -427,7 +548,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
           try {
             mldData = await this.fetchAndParse(
               mldDataset,
-              ['mlotst'],
+              mldVarsInUse,  // mlotst, plus `tob` where a region routes bottom temperature here
               lat, lon,
               mldDateStr, mldDateStr,
               padding
@@ -439,6 +560,45 @@ export class RealCopernicusProvider implements CopernicusProvider {
             }
             mldData = null;
           } catch (err) {
+            // A dataset that does not carry the bottom-temperature variable must not cost us the
+            // mixed layer depth as well.
+            //
+            // Both ride in ONE call, and copernicusmarine fails the entire subset when any requested
+            // variable is absent. So before this branch, routing bottom temperature at a product
+            // that turned out to lack `tob` would have taken MLD down with it — silently: every
+            // error here is swallowed, no truth-check watches MLD, and it feeds only a display card.
+            // NWS would have gone from 703 of 800 cells to zero with nothing to say so.
+            //
+            // The evidence says it should not fire: GLO_AP/AM/AF issue this exact call and return
+            // MLD for 3,582 of 3,582 coastal cells, which is impossible if `tob` is missing from
+            // the product. It exists because the cost of being wrong is asymmetric — dropping the
+            // new variable loses nothing we had, dropping the call loses something we did.
+            if (err instanceof Error &&
+                err.message.startsWith('VARIABLE_NOT_FOUND:') &&
+                mldVarsInUse.length > 1) {
+              const dropped = mldVarsInUse.slice(1).join(', ');
+              console.warn(`   ⚠️  ${mldDataset} has no '${dropped}' — retrying MLD without it`);
+              mldVarsInUse = ['mlotst'];
+              try {
+                mldData = await this.fetchAndParse(
+                  mldDataset,
+                  mldVarsInUse,
+                  lat, lon,
+                  mldDateStr, mldDateStr,
+                  padding
+                );
+                if (mldData && this.hasValidData(mldData)) {
+                  const ageNote = dayOffset > 0 ? ` (${dayOffset}d old)` : '';
+                  console.log(`   ✅ MLD found without '${dropped}' at ${padding}° padding${ageNote}`);
+                  break;
+                }
+                mldData = null;
+              } catch {
+                // The narrowed request failed too. Remaining paddings and dates now use the shorter
+                // list, so this cell falls back to the ordinary retry path.
+              }
+              continue;
+            }
             const isLastAttempt = dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1] &&
                                  padding === paddings[paddings.length - 1];
             if (isLastAttempt) {
@@ -452,7 +612,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
       if (temperatureData) {
         const successfulPadding = paddings.find(_p => temperatureData !== null) || paddings[0];
 
-        for (const dayOffset of stableDateFallbacks) {
+        for (const dayOffset of satelliteDateFallbacks) {
           if (transparencyData) break;
 
           const transDate = new Date(start);
@@ -472,16 +632,19 @@ export class RealCopernicusProvider implements CopernicusProvider {
               console.log(`   ✅ Transparency data (kd490) found with ${successfulPadding}° padding${ageNote}`);
             }
           } catch (_err) {
-            if (dayOffset === stableDateFallbacks[stableDateFallbacks.length - 1]) {
-              console.warn(`   ⚠️  No transparency data available (satellite gaps after ${stableDateFallbacks.length} days)`);
+            if (dayOffset === satelliteDateFallbacks[satelliteDateFallbacks.length - 1]) {
+              console.warn(`   ⚠️  No transparency data available (satellite gaps after ${satelliteDateFallbacks.length} days)`);
             }
           }
         }
       }
 
       // Try biogeochemical with date fallback (BGC is stable over days)
+      if (this.bgcCircuitOpen) {
+        console.log(`   🔌 BGC circuit open — skipping bio fetch for this cell`);
+      }
       for (const dayOffset of stableDateFallbacks) {
-        if (bioData) break;
+        if (bioData || this.bgcCircuitOpen) break;
 
         const bgcDate = new Date(start);
         bgcDate.setDate(bgcDate.getDate() - dayOffset);
@@ -522,9 +685,31 @@ export class RealCopernicusProvider implements CopernicusProvider {
         }
       }
 
+      // Track BGC availability across cells for this region's run. Cells are
+      // processed in parallel batches (see class-level comment above), so
+      // this records each cell's own outcome into a sliding window rather
+      // than assuming strict ordering — robust to concurrent completions.
+      // If a clear majority of recent attempts had no BGC data, the CMEMS
+      // BGC worker is almost certainly down for this region — stop burning
+      // time retrying it and open the circuit for the rest of the run.
+      if (!this.bgcCircuitOpen) {
+        this.bgcRecentOutcomes.push(!!bioData);
+        if (this.bgcRecentOutcomes.length > RealCopernicusProvider.BGC_WINDOW_SIZE) {
+          this.bgcRecentOutcomes.shift();
+        }
+        const failuresInWindow = this.bgcRecentOutcomes.filter(had => !had).length;
+        if (
+          this.bgcRecentOutcomes.length >= RealCopernicusProvider.BGC_WINDOW_SIZE &&
+          failuresInWindow >= RealCopernicusProvider.BGC_FAILURE_THRESHOLD
+        ) {
+          this.bgcCircuitOpen = true;
+          console.warn(`   🔌 BGC circuit breaker tripped: ${failuresInWindow}/${this.bgcRecentOutcomes.length} of the last cells had no BGC data — skipping BGC (bio/nutrients/carbonate/PFT/plankton) for the rest of this run. Physics data is unaffected.`);
+        }
+      }
+
       // Try nutrients (no3, po4, si, fe) - separate dataset for split BGC models (GLO, NWS, MED)
       const nutrientDataset = this.datasetConfig?.nutrients;
-      if (nutrientDataset) {
+      if (nutrientDataset && !this.bgcCircuitOpen) {
         for (const dayOffset of stableDateFallbacks) {
           if (nutrientData) break;
 
@@ -564,7 +749,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
 
       // Try carbonate chemistry (ph) - separate dataset for split BGC models (GLO, NWS, MED)
       const carbonateDataset = this.datasetConfig?.carbonateChemistry;
-      if (carbonateDataset) {
+      if (carbonateDataset && !this.bgcCircuitOpen) {
         for (const dayOffset of stableDateFallbacks) {
           if (carbonateData) break;
 
@@ -605,7 +790,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
       // Try PFT (phytoplankton carbon) - separate dataset from bgc-bio
       const pftDataset = this.datasetConfig?.planktonFunctionalTypes || 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m';
       for (const dayOffset of stableDateFallbacks) {
-        if (pftData) break;
+        if (pftData || this.bgcCircuitOpen) break;
 
         const pftDate = new Date(start);
         pftDate.setDate(pftDate.getDate() - dayOffset);
@@ -643,7 +828,7 @@ export class RealCopernicusProvider implements CopernicusProvider {
       // Try plankton (zooplankton carbon) - separate dataset from bgc-bio
       const planktonDataset = this.datasetConfig?.zooplankton || 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m';
       for (const dayOffset of stableDateFallbacks) {
-        if (planktonData) break;
+        if (planktonData || this.bgcCircuitOpen) break;
 
         const planktonDate = new Date(start);
         planktonDate.setDate(planktonDate.getDate() - dayOffset);

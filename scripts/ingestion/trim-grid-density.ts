@@ -15,6 +15,7 @@
 import { config } from 'dotenv';
 import { resolve } from 'path';
 import { createClient } from '@supabase/supabase-js';
+import { cmemsRegionFromCoords } from '../../src/lib/copernicus/cmemsRegion';
 
 // ─── Environment ─────────────────────────────────────────────────────────────
 
@@ -58,19 +59,12 @@ function hashCellId(cellId: string): number {
   return Math.abs(h) / 2147483647;
 }
 
-// ─── CMEMS Region Assignment (matches ingest-copernicus-data.ts) ────────────
+// ─── CMEMS Region Assignment ────────────────────────────────────────────────
+// Now genuinely shared with ingest-copernicus-data.ts rather than hand-copied. The header here
+// used to claim the two matched; they had diverged — this copy carried a Black Sea box placed
+// after MED (so mostly shadowed), and the ingest copy carried none at all.
 
-function getCmemsRegion(lat: number, lon: number): string {
-  if (lat >= 30 && lat <= 46 && lon >= -6 && lon <= 36) return 'MED';
-  if (lat >= 40 && lat <= 48 && lon >= 27 && lon <= 42) return 'BLK';
-  if (lat >= 53 && lat <= 66 && lon >= 10 && lon <= 30) return 'BAL';
-  if (lat >= 48 && lat <= 63 && lon >= -12 && lon <= 13) return 'NWS';
-  if (lat >= 36 && lat <= 54 && lon >= -20 && lon <= -5) return 'IBI';
-  if (lat > 66) return 'ARC';
-  if (lon <= -30) return 'GLO_AM';
-  if (lon >= 90) return 'GLO_AP';
-  return 'GLO_AF';
-}
+const getCmemsRegion = (lat: number, lon: number): string => cmemsRegionFromCoords(lat, lon);
 
 // ─── Sub-region Classification ──────────────────────────────────────────────
 

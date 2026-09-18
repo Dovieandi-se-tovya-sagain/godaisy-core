@@ -1,0 +1,126 @@
+name: Diagnose ocean-colour coverage (manual)
+
+# TEMPORARY DIAGNOSTIC. Delete once it has answered its question.
+#
+# Kd490 coverage in grid_conditions_latest splits sharply and nothing in the
+# configuration explains it. Measured 2026-08-10, holding latitude constant at
+# 45-60N so geography cannot be the variable:
+#
+#   copernicus-NWS   747 cells   99.6%   atl 1km L3
+#   copernicus-BAL   413 cells   99.0%   bal 300m L3
+#   copernicus-GLO   223 cells   ~43%    glo 4km L4-gapfree
+#   copernicus-MED    89 cells   42.7%   med 1km L3
+#
+# Ruled out by measurement, not argument: satellite geography (the latitude
+# gradient runs the wrong way -- tropics 20.6%, temperate 77.6%), ingestion
+# rotation (every source is 0-4h old), and region misclassification (all 1,350
+# MED cells are inside the Mediterranean). Also not regional-vs-global and not
+# L3-vs-L4: MED is a correctly configured regional 1km L3 product and still
+# sits at half of NWS.
+#
+# What remains invisible from the database is the only thing that matters: a
+# fetch that SUCCEEDS AND RETURNS NULL and a fetch that FAILS look identical
+# once stored -- both are just a missing Kd490. This asks the toolbox directly.
+#
+# The sharpest case is the adjacent pair off Libya: two cells 0.25 degrees
+# apart, same longitude, same dataset, same run -- one has Kd490, one does not.
+# If both requests succeed and one simply has no pixel, the answer is genuine
+# satellite gaps and the config is fine. If one errors, the answer is our fetch.
+#
+# Read-only: no database writes, manual dispatch only.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Copernicus Marine Toolbox
+        run: |
+          python -m pip install --upgrade pip
+          pip install "botocore>=1.40.46"
+          pip install copernicusmarine
+
+      - name: Login
+        env:
+          COPERNICUS_USERNAME: ${{ secrets.COPERNICUS_USERNAME }}
+          COPERNICUS_PASSWORD: ${{ secrets.COPERNICUS_PASSWORD }}
+        run: |
+          copernicusmarine --version
+          yes | copernicusmarine login --username "$COPERNICUS_USERNAME" --password "$COPERNICUS_PASSWORD"
+
+      - name: Probe Kd490 for known-good and known-empty cells
+        run: |
+          python - <<'PY'
+          import subprocess, sys, tempfile, os
+
+          # (label, dataset as configured in regionRouter.ts, lat, lon, what the DB holds)
+          CASES = [
+              ("NWS  control, HAS kd490",
+               "cmems_obs-oc_atl_bgc-transp_nrt_l3-multi-1km_P1D", 48.375, -3.875, "0.1203"),
+              ("MED  adjacent pair A, HAS kd490",
+               "cmems_obs-oc_med_bgc-transp_nrt_l3-multi-1km_P1D", 30.625, 19.125, "0.0167"),
+              ("MED  adjacent pair B, NULL",
+               "cmems_obs-oc_med_bgc-transp_nrt_l3-multi-1km_P1D", 30.375, 19.125, "null"),
+              ("GLO  NULL",
+               "cmems_obs-oc_glo_bgc-transp_nrt_l4-gapfree-multi-4km_P1D", 1.375, 9.625, "null"),
+          ]
+
+          # Pad by a quarter degree, matching realClient's coastal padding, so the
+          # request shape resembles production rather than a bare point.
+          PAD = 0.25
+
+          for label, dataset, lat, lon, stored in CASES:
+              print("=" * 78)
+              print(f"{label}\n  dataset : {dataset}\n  point   : {lat}, {lon}\n  stored  : {stored}")
+              out = os.path.join(tempfile.mkdtemp(), "probe.nc")
+              cmd = [
+                  "copernicusmarine", "subset",
+                  "--dataset-id", dataset,
+                  "--variable", "KD490",
+                  "--minimum-latitude", str(lat - PAD), "--maximum-latitude", str(lat + PAD),
+                  "--minimum-longitude", str(lon - PAD), "--maximum-longitude", str(lon + PAD),
+                  "--output-filename", out,
+                  "--overwrite",
+              ]
+              r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+              print(f"  exit    : {r.returncode}")
+              if r.returncode != 0:
+                  print("  RESULT  : REQUEST FAILED  <-- our fetch, not the data")
+                  print("  stderr  :", (r.stderr or "").strip()[:600])
+                  continue
+
+              # The request worked. Does the file actually contain a value?
+              try:
+                  import xarray as xr
+                  ds = xr.open_dataset(out)
+                  var = ds["KD490"]
+                  total = int(var.size)
+                  good = int(var.notnull().sum())
+                  print(f"  RESULT  : request OK — {good}/{total} pixels have a value")
+                  if good:
+                      print(f"  sample  : {float(var.max()):.4f} (max in window)")
+                  else:
+                      print("  meaning : genuine satellite gap at this location, config is fine")
+                  ds.close()
+              except Exception as e:
+                  print("  (xarray unavailable or unreadable file):", str(e)[:200])
+          print("=" * 78)
+          PY
+
+      - name: What the answer means
+        if: always()
+        run: |
+          echo "REQUEST FAILED on MED/GLO but OK on NWS  -> our fetch is wrong; fix the client"
+          echo "All requests OK, empty windows on the nulls -> genuine satellite gaps; config is correct"
+          echo "                                                and the coverage number is the truth"

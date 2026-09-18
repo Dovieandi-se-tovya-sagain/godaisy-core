@@ -15,6 +15,7 @@
 import { config } from 'dotenv';
 import { resolve } from 'path';
 import { createClient } from '@supabase/supabase-js';
+import { cmemsRegionFromCoords } from '../../src/lib/copernicus/cmemsRegion';
 
 // Try .env.local first, then .env.cli
 config({ path: resolve(process.cwd(), '.env.local') });
@@ -103,13 +104,15 @@ function getCmemsRegion(region: string, lat: number, lon: number): string {
     lat > 66
   ) return 'ARC';
 
-  // Geographic bounds fallback
-  if (lat >= 30 && lat <= 46 && lon >= -6 && lon <= 36) return 'MED';
-  if (lat >= 53 && lat <= 66 && lon >= 10 && lon <= 30) return 'BAL';
-  if (lat >= 48 && lat <= 63 && lon >= -12 && lon <= 13) return 'NWS';
-  if (lat >= 36 && lat <= 54 && lon >= -20 && lon <= -5) return 'IBI';
-
-  return 'GLO';
+  // Geographic bounds fallback — shared with the ingestion scripts, which is where the Black
+  // Sea box was missing entirely. This copy matters less because its caller passes a real ICES
+  // region name (`rect.region || ''`), so the name branches above usually fire first, but it
+  // had the same hole.
+  //
+  // splitGlobal: false preserves this script's single 'GLO' value. The ingestion scripts want
+  // the GLO_AM/GLO_AP/GLO_AF split their CI matrix schedules on; the values already stored by
+  // this one are 'GLO', and changing that would be a data migration, not a refactor.
+  return cmemsRegionFromCoords(lat, lon, { splitGlobal: false });
 }
 
 // ─── Inland Detection ────────────────────────────────────────────────────────

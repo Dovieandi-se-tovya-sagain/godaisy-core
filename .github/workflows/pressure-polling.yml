@@ -11,7 +11,7 @@ on:
   workflow_dispatch: # Allow manual triggers
 
 env:
-  NODE_VERSION: '20.x'
+  NODE_VERSION: '24.x'
 
 jobs:
   poll-pressure:

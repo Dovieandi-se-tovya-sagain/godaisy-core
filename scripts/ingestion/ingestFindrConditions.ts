@@ -20,6 +20,7 @@ import {
   fetchWorldTides,
   type WorldTidesResponse,
 } from '../../src/lib/services/weatherService';
+import { redactOpenMeteoError } from '../../src/lib/services/openMeteoUrl';
 
 interface UpsertRow {
   rectangle_code: string;
@@ -155,12 +156,22 @@ async function fetchNOAATides(lat: number, lon: number): Promise<Array<{ time: s
   }
 }
 
+type TideSource = 'worldtides' | 'noaa' | 'stormglass' | 'none';
+
 interface IngestRectangleResult {
   success: boolean;
   source: IngestSource;
   metProbeAttempts: number;
   metProbeSuccessLabel: string | null;
   lastProbeLabel: string | null;
+  /**
+   * Which tier of the tide waterfall actually delivered, so the run can report
+   * a zero once instead of warning 324 times. fetchWorldTides already logged
+   * "API key not configured" per rectangle; that ran every day from 2026-07-17
+   * and nobody read it, because 324 identical lines in a 5,000-line log are
+   * indistinguishable from noise. A single summary line is not.
+   */
+  tideSource: TideSource;
 }
 
 interface CoverageDetailEntry {
@@ -645,10 +656,22 @@ async function buildOpenMeteoMarineFallback(
 
   const windSpeedKts = firstHour.windSpeedKts ?? toKnots(firstHour.windSpeedMS);
 
-  // Phase 1: Fetch weather data (pressure, cloud cover) from OpenMeteo weather API
-  // This supplements the marine data with atmospheric conditions for European rectangles
+  // Phase 1: Fetch atmospheric data from the Open-Meteo FORECAST api.
+  //
+  // Wind has to come from here. Open-Meteo's MARINE api serves waves, swell,
+  // sea level, SST and currents -- no wind at any depth (probed 2026-08-11 at
+  // 38.75,9.5: hourly keys are time/wave_height/sea_surface_temperature). So
+  // `firstHour.windSpeedKts` above is structurally always null on this path,
+  // and every rectangle Open-Meteo covered was stored with no wind at all --
+  // 125 of 324 on 2026-08-11, all of them southern (Iberia, Med, Black Sea).
+  //
+  // The forecast call below was already being made for pressure and cloud, and
+  // already requested windspeed_10m. The value arrived and was dropped on the
+  // floor. It is now read across, along with wind direction.
   let airPressureHpa: number | null = null;
   let cloudCoverPct: number | null = null;
+  let weatherWindSpeedKts: number | null = null;
+  let weatherWindDirectionDeg: number | null = null;
 
   try {
     const startDate = start.toISOString().split('T')[0]; // YYYY-MM-DD
@@ -662,36 +685,72 @@ async function buildOpenMeteoMarineFallback(
     ) as any;
 
     if (weatherData?.hourly) {
-      const times = weatherData.hourly.time || [];
+      const times: string[] = weatherData.hourly.time || [];
       const pressures = weatherData.hourly.pressure_msl || [];
       const cloudCovers = weatherData.hourly.cloud_cover || [];
+      const windSpeeds = weatherData.hourly.windspeed_10m || [];
+      const windDirections = weatherData.hourly.winddirection_10m || [];
 
-      // Get first hour data (matching marine data first hour)
-      if (times.length > 0 && pressures.length > 0) {
-        const pressure = pressures[0];
-        if (typeof pressure === 'number' && !isNaN(pressure)) {
-          airPressureHpa = toFixedOrNull(pressure, 1);
+      // Pick the hour that matches the marine observation rather than index 0.
+      //
+      // The request uses timezone=auto, so times[] are LOCAL wall-clock strings
+      // with no offset ("2026-08-11T00:00") and index 0 is local midnight, not
+      // the hour we are describing. Reading [0] reported midnight conditions
+      // against a mid-morning capture -- measured at 38.75,9.5 on 2026-08-11,
+      // index 0 gave 0.73 m/s where the actual observation hour gave 1.62.
+      // utc_offset_seconds converts them back to real instants.
+      const offsetMs = Number(weatherData.utc_offset_seconds ?? 0) * 1000;
+      const targetMs = Date.parse(firstHour.timeISO ?? start.toISOString());
+      let idx = 0;
+      let bestDelta = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < times.length; i += 1) {
+        const localMs = Date.parse(`${times[i]}Z`); // parse as if UTC...
+        if (Number.isNaN(localMs)) continue;
+        const delta = Math.abs(localMs - offsetMs - targetMs); // ...then undo the offset
+        if (delta < bestDelta) {
+          bestDelta = delta;
+          idx = i;
         }
       }
 
-      if (times.length > 0 && cloudCovers.length > 0) {
-        const cloudCover = cloudCovers[0];
-        if (typeof cloudCover === 'number' && !isNaN(cloudCover)) {
-          cloudCoverPct = toFixedOrNull(cloudCover, 0);
-        }
-      }
+      const at = (arr: unknown[]): number | null => {
+        const v = arr[idx];
+        return typeof v === 'number' && !Number.isNaN(v) ? v : null;
+      };
+
+      const pressure = at(pressures);
+      if (pressure !== null) airPressureHpa = toFixedOrNull(pressure, 1);
+
+      const cloudCover = at(cloudCovers);
+      if (cloudCover !== null) cloudCoverPct = toFixedOrNull(cloudCover, 0);
+
+      // windspeed_unit=ms is set on the request, so toKnots (m/s -> kn) is the
+      // right conversion. Left at Open-Meteo's default of km/h this would
+      // overstate wind by 3.6x -- plausible-looking and silent, which is how
+      // this pipeline usually gets hurt.
+      // toKnots already rounds to 1dp and returns null on non-finite input,
+      // so no toFixedOrNull wrapper here -- matching how the marine path above
+      // calls it.
+      const windMs = at(windSpeeds);
+      if (windMs !== null) weatherWindSpeedKts = toKnots(windMs);
+
+      const windDir = at(windDirections);
+      if (windDir !== null) weatherWindDirectionDeg = toFixedOrNull(windDir, 0);
     }
   } catch (error) {
     // Weather data is supplementary - don't fail if it's unavailable
-    console.warn(`[OpenMeteo] Weather data fetch failed for ${lat.toFixed(4)},${lon.toFixed(4)}:`, error);
+    console.warn(`[OpenMeteo] Weather data fetch failed for ${lat.toFixed(4)},${lon.toFixed(4)}:`, redactOpenMeteoError(error));
   }
 
   return {
     hourlySeries,
     seaTemperatureC: toFixedOrNull(firstHour.seaTemperatureC, 2),
     waveHeightM: toFixedOrNull(firstHour.waveHeightM, 2),
-    windSpeedKts,
-    windDirectionDeg: toFixedOrNull(firstHour.windDirectionDeg, 0),
+    // Marine first, forecast second. Marine is preferred on principle -- if a
+    // future marine product ever does carry wind it is the better-matched
+    // source -- but today it never does, so the forecast value is what lands.
+    windSpeedKts: windSpeedKts ?? weatherWindSpeedKts,
+    windDirectionDeg: toFixedOrNull(firstHour.windDirectionDeg, 0) ?? weatherWindDirectionDeg,
     seaLevelMeters: toTide(firstHour.seaLevelMeters),
     airPressureHpa,
     cloudCoverPct,
@@ -775,6 +834,7 @@ export async function ingestRectangle(
         metProbeAttempts,
         metProbeSuccessLabel: null,
         lastProbeLabel,
+        tideSource: 'none',
       } satisfies IngestRectangleResult;
     }
 
@@ -791,6 +851,7 @@ export async function ingestRectangle(
         metProbeAttempts,
         metProbeSuccessLabel: null,
         lastProbeLabel,
+        tideSource: 'none',
       } satisfies IngestRectangleResult;
     }
     dataSource = 'stormglass';
@@ -826,7 +887,11 @@ export async function ingestRectangle(
   let tidesRaw: StormglassTideResponse | null = null;
   if (!tideData && dataSource === 'stormglass' && stormglassKey) {
     const sgKey = stormglassKey;
-    tidesRaw = await fetchStormglassTides(lat, lon, sgKey) as Promise<StormglassTideResponse | null>;
+    // Cast the RESOLVED value, not a Promise. `await x as Promise<T>` labels
+    // the already-awaited result as a Promise -- harmless at runtime, but it
+    // tells the type system the opposite of the truth, in the tier that is
+    // supposed to be the tide safety net.
+    tidesRaw = (await fetchStormglassTides(lat, lon, sgKey)) as StormglassTideResponse | null;
     if (tidesRaw && tidesRaw.data) {
       tideData = tidesRaw.data;
       tideSource = 'stormglass';
@@ -837,7 +902,7 @@ export async function ingestRectangle(
   // Fetch bio data from Stormglass if available
   let bioRaw: StormglassBioResponse | null = null;
   if (dataSource === 'stormglass' && stormglassKey) {
-    bioRaw = await fetchStormglassBio(lat, lon, start.toISOString(), end.toISOString(), undefined, stormglassKey) as Promise<StormglassBioResponse | null>;
+    bioRaw = (await fetchStormglassBio(lat, lon, start.toISOString(), end.toISOString(), undefined, stormglassKey)) as StormglassBioResponse | null;
   }
 
   const hourlySeries = metMarine
@@ -933,8 +998,44 @@ export async function ingestRectangle(
         : 'ingest:stormglass',
   };
 
-  const { error } = await client.from('findr_conditions_snapshots').upsert(row as any, {
-    onConflict: 'rectangle_code,captured_at',
+  // Upsert on the constraint that is actually enforced, and never let one source
+  // erase another's coverage.
+  //
+  // Two unique indexes exist on this table:
+  //
+  //     findr_conditions_snapshots_rectangle_captured_at_idx (rectangle_code, captured_at)
+  //     uniq_snap_rect_day                                   (rectangle_code, snapshot_day)
+  //
+  // snapshot_day is derived from captured_at by trg_set_snapshot_day. This
+  // upsert targeted captured_at, which is the run timestamp and therefore never
+  // collides -- so Postgres fell through to a plain INSERT and hit
+  // uniq_snap_rect_day instead: 23505, every row, on every run after the first
+  // of the day. Observed 2026-08-11, when the 01:55 MET run inserted cleanly and
+  // the 07:11 one failed all 324 rectangles. MET runs four times a day, so three
+  // of those four were failing every day.
+  //
+  // Stripping nulls matters as much as the conflict target. MET Norway and
+  // Open-Meteo are equally good and have DIFFERENT coverage -- MET is preferred
+  // only because it is free and unlimited where Open-Meteo is discretionary --
+  // so the point of running both is that each fills gaps the other leaves. The
+  // row below names every column explicitly, and any of them may be null. Once
+  // the conflict target is corrected, a later run would write those nulls over
+  // fields an earlier source had filled, quietly deleting the coverage the
+  // second source exists to provide. Only columns this run actually has a value
+  // for are sent.
+  //
+  // rectangle_code, captured_at and source are always sent: the first two are
+  // the identity and the trigger's input, and source records which feed last
+  // contributed.
+  const ALWAYS_SEND = new Set(['rectangle_code', 'captured_at', 'source']);
+  const writableRow = Object.fromEntries(
+    Object.entries(row).filter(
+      ([key, value]) => ALWAYS_SEND.has(key) || (value !== null && value !== undefined),
+    ),
+  );
+
+  const { error } = await client.from('findr_conditions_snapshots').upsert(writableRow as any, {
+    onConflict: 'rectangle_code,snapshot_day',
   });
 
   if (error) {
@@ -945,6 +1046,7 @@ export async function ingestRectangle(
       metProbeAttempts,
       metProbeSuccessLabel,
       lastProbeLabel,
+      tideSource,
     } satisfies IngestRectangleResult;
   }
 
@@ -955,6 +1057,7 @@ export async function ingestRectangle(
     metProbeAttempts,
     metProbeSuccessLabel,
     lastProbeLabel,
+    tideSource,
   } satisfies IngestRectangleResult;
 }
 
@@ -969,10 +1072,16 @@ export async function ingestRectangles(
   rectangles: TargetRectangle[],
   stormglassKey: string | undefined,
   options: IngestRectanglesOptions = {},
-): Promise<{ successCount: number; capturedAtISO: string; detail: CoverageDetails }> {
+): Promise<{
+  successCount: number;
+  capturedAtISO: string;
+  detail: CoverageDetails;
+  tideCounts: Record<TideSource, number>;
+}> {
   const delayMs = options.delayBetweenRequestsMs ?? 300;
   const capturedAt = options.capturedAtISO ?? new Date().toISOString();
   let successCount = 0;
+  const tideCounts: Record<TideSource, number> = { worldtides: 0, noaa: 0, stormglass: 0, none: 0 };
 
   const metOnly = Boolean(options.metOnly);
   const detail: CoverageDetails = {
@@ -997,6 +1106,25 @@ export async function ingestRectangles(
       targetLon = fallbackRect.centerLon;
     }
 
+    // FALLBACK_RECTANGLE_BY_CODE only covers a hand-picked set of European
+    // rectangle codes. If a rectangle's own coordinates are missing/blank AND
+    // it isn't in that list (any US/global rectangle, for example), don't
+    // silently ingest real weather data at (0, 0) — Null Island — under this
+    // rectangle's real code. Skip it and count it as a failure instead.
+    if (needsFallback && !fallbackRect) {
+      console.warn(`[conditions-ingest] Skipping ${rectangle.code}: no usable coordinates and no fallback entry`);
+      detail.failures.push({
+        code: rectangle.code,
+        region: 'Unknown',
+        attempts: 0,
+        metProbeLabel: null,
+      });
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+      continue;
+    }
+
     const result = await ingestRectangle(
       client,
       rectangle,
@@ -1016,6 +1144,7 @@ export async function ingestRectangles(
 
     if (result.success) {
       successCount += 1;
+      tideCounts[result.tideSource] += 1;
       if (result.source === 'met') {
         detail.metSuccess.push(entry);
       } else if (result.source === 'openmeteo') {
@@ -1031,7 +1160,7 @@ export async function ingestRectangles(
     }
   }
 
-  return { successCount, capturedAtISO: capturedAt, detail };
+  return { successCount, capturedAtISO: capturedAt, detail, tideCounts };
 }
 
 async function main() {
@@ -1076,6 +1205,33 @@ async function main() {
     `[conditions-ingest] Coverage summary — MET primary/extended: ${metSuccess.length}, Open-Meteo fallback: ${openMeteoEntries.length}, Stormglass fallback: ${stormglassEntries.length}, Unresolved MET voids: ${failures.length}`
   );
 
+  // Tides get their own line, and a zero shouts.
+  //
+  // Every tier of the waterfall was unreachable from 2026-07-17 to 2026-08-11:
+  // WorldTides returned null at its key check because WORLDTIDES_API_KEY was
+  // never passed by either workflow, NOAA only covers North American coasts and
+  // every rectangle here is European, and Stormglass requires
+  // dataSource === 'stormglass' which these runs never are. Result:
+  // next_high_tide_iso null in all 7,000 rows.
+  //
+  // fetchWorldTides did warn, once per rectangle, every run. 324 identical
+  // lines buried in a 5,000-line log is not a signal, and a month of them went
+  // unread. One line that names the number is.
+  const { tideCounts } = result;
+  const tidesResolved = tideCounts.worldtides + tideCounts.noaa + tideCounts.stormglass;
+  const tideLine =
+    `[conditions-ingest] Tide coverage — WorldTides: ${tideCounts.worldtides}, NOAA: ${tideCounts.noaa}, ` +
+    `Stormglass: ${tideCounts.stormglass}, no tide data: ${tideCounts.none}`;
+  if (tidesResolved === 0 && result.successCount > 0) {
+    console.warn(`${tideLine}  ❌ NO RECTANGLE GOT TIDES`);
+    console.warn(
+      '[conditions-ingest] Every tide tier failed. Check WORLDTIDES_API_KEY is set — ' +
+        'without it tier 1 returns null immediately, and tiers 2 and 3 do not apply to European rectangles.'
+    );
+  } else {
+    console.info(tideLine);
+  }
+
   const recoveredViaExtended = metSuccess.filter((entry) => entry.metProbeLabel && entry.metProbeLabel !== 'primary');
   if (recoveredViaExtended.length) {
     console.info(`[conditions-ingest] MET recovered via extended probes: ${recoveredViaExtended.length}`);
@@ -1095,6 +1251,14 @@ async function main() {
   if (failures.length) {
     logRegionSummary('Outstanding MET voids', failures);
     logCodeSample('MET void rectangle sample', failures, 12);
+  }
+
+  // A run that ingests zero rectangles is a silent outage, not a partial success —
+  // without this the process always exits 0, so the calling GitHub Actions workflow
+  // (which has no separate coverage-check step) has no way to detect it ever failed.
+  if (result.successCount === 0) {
+    console.error(`[conditions-ingest] 0/${rectangles.length} rectangles succeeded. Treating as failure.`);
+    process.exit(1);
   }
 }
 

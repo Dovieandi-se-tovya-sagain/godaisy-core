@@ -10,6 +10,31 @@ export interface CopernicusDatasetConfig {
   salinity?: string;  // Separate salinity dataset (for Mediterranean)
   currents?: string;  // Separate currents dataset (for Mediterranean)
   mixedLayerDepth?: string;  // 2D physics dataset for mlotst (thermocline depth)
+  // Where sea-bed temperature comes from. It is never its own request — it rides as an
+  // extra --variable on a call already being made, so `source` says which one and
+  // `variable` says what it is called there. Asking a product for a variable it does
+  // not have fails the whole call, so this is set only where the dataset this repo
+  // actually requests was confirmed to carry it (`copernicusmarine describe`,
+  // 2026-08-11):
+  //
+  //   BAL / IBI / ARC  physics carries `bottomT`   → source: 'physics'
+  //   GLO              the split thetao product has no bottom field, but the combined
+  //                    product already fetched for mlotst carries `tob`
+  //   NWS              physics is GLO's split thetao (no bottom field) and its MLD
+  //                    product is mlotst-only — no bottom temperature available
+  //   MED / BLK        physics carries `bottomT`   → source: 'physics'. The dataset ids
+  //                    below are the split single-variable "-tem"/"-temp" datasets
+  //                    (verified live via the CMEMS STAC catalogue, 2026-08-14), not the
+  //                    old bundled "Daily" ids these two regions used to carry. Those
+  //                    bundled ids were retired when CMEMS split MED/BLK physics into
+  //                    per-variable datasets; requesting them still intermittently
+  //                    resolved an old, superseded dataset version instead of failing
+  //                    clean, which is why `describe` could never confirm the variable
+  //                    list against them and why ~50% of MED/BLK cell fetches were
+  //                    silently falling back to GLOBAL and losing bottom temperature.
+  //                    BAL/IBI/ARC's bundled ids were never split and remain current, so
+  //                    they don't need this.
+  bottomTemperature?: { source: 'physics' | 'mixedLayerDepth'; variable: 'bottomT' | 'tob' };
   biogeochemistry: string;
   planktonFunctionalTypes?: string;  // PFT dataset for phytoplankton carbon (phyc)
   zooplankton?: string;  // Plankton dataset for zooplankton carbon (zooc)
@@ -38,6 +63,7 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       return {
         physics: 'cmems_mod_bal_phy_anfc_P1D-m',
         mixedLayerDepth: 'cmems_mod_bal_phy_anfc_P1D-m', // BAL bundled physics includes mlotst
+        bottomTemperature: { source: 'physics', variable: 'bottomT' },
         biogeochemistry: 'cmems_mod_bal_bgc_anfc_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -48,8 +74,18 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       };
     case 'MED':
       return {
-        physics: 'cmems_mod_med_phy_anfc_4.2km_P1D-m', // Fixed: was 0.042deg-3D, now 4.2km
+        // Fixed 2026-08-14: was 'cmems_mod_med_phy_anfc_4.2km_P1D-m', the retired bundled
+        // "Daily" id. CMEMS split MED physics into single-variable datasets; that id 404s
+        // against the live STAC catalogue and only intermittently resolved an old,
+        // superseded dataset version (worker logs showed "Selected dataset version:
+        // 202406" against a catalogue now on 202511), which is why ~50% of MED cell
+        // fetches were silently falling back to GLOBAL and losing bottom temperature.
+        // `cmems_mod_med_phy-tem_anfc_4.2km_P1D-m` is the current split temperature
+        // dataset — verified live, carries both `thetao` and `bottomT`.
+        physics: 'cmems_mod_med_phy-tem_anfc_4.2km_P1D-m',
         mixedLayerDepth: 'cmems_mod_med_phy-mld_anfc_4.2km_P1D-m', // MED dedicated MLD product
+        // Routed 2026-08-12, re-confirmed 2026-08-14 against the split dataset above.
+        bottomTemperature: { source: 'physics', variable: 'bottomT' },
         biogeochemistry: 'cmems_mod_med_bgc-bio_anfc_4.2km_P1D-m', // Fixed: added -bio suffix, changed resolution
         planktonFunctionalTypes: 'cmems_mod_med_bgc-pft_anfc_4.2km_P1D-m', // Med has its own PFT product
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -62,8 +98,16 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       };
     case 'BLK':
       return {
-        physics: 'cmems_mod_blk_phy_anfc_2.5km_P1D-m',
-        mixedLayerDepth: 'cmems_mod_blk_phy_anfc_2.5km_P1D-m', // BLK bundled physics includes mlotst
+        // Fixed 2026-08-14: was 'cmems_mod_blk_phy_anfc_2.5km_P1D-m', the retired bundled
+        // "Daily" id — same catalogue split as MED, same silent-fallback symptom. Note the
+        // naming is NOT consistent with MED's: BLK's split temperature dataset is
+        // "-temp", not "-tem". Verified live, carries both `thetao` and `bottomT`.
+        physics: 'cmems_mod_blk_phy-temp_anfc_2.5km_P1D-m',
+        // BLK's MLD is also split out now — the old bundled id no longer carries mlotst.
+        mixedLayerDepth: 'cmems_mod_blk_phy-mld_anfc_2.5km_P1D-m',
+        // Routed 2026-08-12 alongside MED, which had the same gap. Re-pointed 2026-08-14 to the
+        // split -temp dataset, which still bundles bottomT with thetao.
+        bottomTemperature: { source: 'physics', variable: 'bottomT' },
         biogeochemistry: 'cmems_mod_blk_bgc_anfc_2.5km_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -76,6 +120,7 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       return {
         physics: 'cmems_mod_ibi_phy_anfc_0.027deg-3D_P1D-m',
         mixedLayerDepth: 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m', // IBI 3D physics may not expose mlotst; use GLO 2D
+        bottomTemperature: { source: 'physics', variable: 'bottomT' },
         biogeochemistry: 'cmems_mod_ibi_bgc_anfc_0.027deg-3D_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -85,11 +130,37 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
         coverage: 'IBI_ANALYSIS_FORECAST',
       };
     case 'NWS':
-      // NWS has no analysis/forecast product, use GLO with split datasets
+      // NWS has no analysis/forecast product, so this borrows GLO: the SPLIT products for
+      // temperature and salinity, and the COMBINED 2D physics for mixed layer depth. The mix is
+      // deliberate — the combined product is the only one carrying `tob`, and pointing
+      // mixedLayerDepth anywhere else takes bottom temperature back to zero for all 800 cells.
+      // See the note on mixedLayerDepth below before changing either.
       return {
         physics: 'cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m', // Temperature dataset
         salinity: 'cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m', // Salinity dataset (split from physics)
-        mixedLayerDepth: 'cmems_mod_nws_phy-mld_anfc_7km-2D_P1D-m', // NWS dedicated MLD product (7km)
+        // GLO's combined 2D physics, not the NWS 7km MLD product. This is the trade the comment
+        // that stood here declined to make — now made deliberately, with the measurement it was
+        // waiting for.
+        //
+        // The constraint it described is real: bottom temperature rides along on a call we already
+        // make, and asking a product for a variable it lacks fails that whole call. NWS's physics is
+        // GLO's split thetao (no bottom field) and the NWS 7km MLD product carries mlotst and
+        // nothing else, so between those two datasets there is nowhere to put `tob`. Only swapping
+        // one of them changes that.
+        //
+        // What settles it is what each field is worth. Measured against production 2026-08-12:
+        // NEITHER prediction engine reads mixed layer depth — `mlotst` and `mixed_layer_depth_m`
+        // appear nowhere in get_fishing_confidence_v3 or get_global_fishing_predictions — while
+        // get_global_fishing_predictions DOES read bottom_temperature_c, and it is the engine that
+        // serves these cells. MLD survives only in the conditions dashboard, as display.
+        //
+        // Cost: MLD resolution on a field nothing scores, 7km to GLO's 0.083° (~9km).
+        // Gain: bottom temperature across all 800 NWS cells, which read 0/800 before this against
+        // BAL's 640/707, and which the 43 species carrying surface_temp_applies = false need before
+        // they can score temperature at all rather than abstaining. The UK shelf is not a marginal
+        // place to be missing demersal temperature.
+        mixedLayerDepth: 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m',
+        bottomTemperature: { source: 'mixedLayerDepth', variable: 'tob' },
         biogeochemistry: 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -104,6 +175,7 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
       return {
         physics: 'cmems_mod_arc_phy_anfc_6km_detided_P1D-m',
         mixedLayerDepth: 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m', // ARC: use GLO 2D physics for mlotst
+        bottomTemperature: { source: 'physics', variable: 'bottomT' },
         biogeochemistry: 'cmems_mod_arc_bgc_anfc_ecosmo_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -113,11 +185,16 @@ export function getDatasetForCmemsRegion(cmemsRegion: string): CopernicusDataset
         coverage: 'ARCTIC_ANALYSIS_FORECAST',
       };
     case 'GLO':
-      // Global Ocean uses split datasets for temperature and salinity
+      // Global Ocean uses the SPLIT products for temperature and salinity, and the COMBINED 2D
+      // physics for mixed layer depth. That last one is not interchangeable with the split
+      // products: it is the only one carrying `tob`, which is where GLO's bottom temperature comes
+      // from. This is also the majority path — getProvider passes no region for GLO_AM/AP/AF, so
+      // realClient falls back to these same datasets for 3,568 of the 7,649 cells.
       return {
         physics: 'cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m', // Temperature dataset
         salinity: 'cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m', // Salinity dataset (split from physics)
         mixedLayerDepth: 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m', // GLO 2D physics for mlotst (no depth dimension)
+        bottomTemperature: { source: 'mixedLayerDepth', variable: 'tob' }, // split thetao product has no bottom field
         biogeochemistry: 'cmems_mod_glo_bgc-bio_anfc_0.25deg_P1D-m',
         planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
         zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -150,6 +227,7 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
     return {
       physics: 'cmems_mod_bal_phy_anfc_P1D-m',
       mixedLayerDepth: 'cmems_mod_bal_phy_anfc_P1D-m',
+      bottomTemperature: { source: 'physics', variable: 'bottomT' },
       biogeochemistry: 'cmems_mod_bal_bgc_anfc_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -190,8 +268,13 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
     regionLower.includes('peloponnese')
   ) {
     return {
-      physics: 'cmems_mod_med_phy_anfc_4.2km_P1D-m',
+      // See getDatasetForCmemsRegion's 'MED' case: the old bundled id was retired by CMEMS.
+      physics: 'cmems_mod_med_phy-tem_anfc_4.2km_P1D-m',
       mixedLayerDepth: 'cmems_mod_med_phy-mld_anfc_4.2km_P1D-m',
+      // Added 2026-08-14 (Copilot review, PR #93): this fallback path never requested bottomT
+      // even after the physics id above was fixed to carry it. Same routing as
+      // getDatasetForCmemsRegion('MED') for consistency.
+      bottomTemperature: { source: 'physics', variable: 'bottomT' },
       biogeochemistry: 'cmems_mod_med_bgc-bio_anfc_4.2km_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_med_bgc-pft_anfc_4.2km_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -215,8 +298,12 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
     regionLower.includes('crimea')
   ) {
     return {
-      physics: 'cmems_mod_blk_phy_anfc_2.5km_P1D-m',
-      mixedLayerDepth: 'cmems_mod_blk_phy_anfc_2.5km_P1D-m',
+      // See getDatasetForCmemsRegion's 'BLK' case: the old bundled id was retired by CMEMS.
+      // Note BLK's split temperature dataset is "-temp", not "-tem" like MED's.
+      physics: 'cmems_mod_blk_phy-temp_anfc_2.5km_P1D-m',
+      mixedLayerDepth: 'cmems_mod_blk_phy-mld_anfc_2.5km_P1D-m',
+      // Added 2026-08-14 (Copilot review, PR #93): same gap as MED's case above.
+      bottomTemperature: { source: 'physics', variable: 'bottomT' },
       biogeochemistry: 'cmems_mod_blk_bgc_anfc_2.5km_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -252,6 +339,7 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
     return {
       physics: 'cmems_mod_ibi_phy_anfc_0.027deg-3D_P1D-m',
       mixedLayerDepth: 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m',
+      bottomTemperature: { source: 'physics', variable: 'bottomT' },
       biogeochemistry: 'cmems_mod_ibi_bgc_anfc_0.027deg-3D_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',
@@ -309,6 +397,7 @@ export function getDatasetForRegion(region: string): CopernicusDatasetConfig | n
     return {
       physics: 'cmems_mod_arc_phy_anfc_6km_detided_P1D-m',
       mixedLayerDepth: 'cmems_mod_glo_phy_anfc_0.083deg_P1D-m',
+      bottomTemperature: { source: 'physics', variable: 'bottomT' },
       biogeochemistry: 'cmems_mod_arc_bgc_anfc_ecosmo_P1D-m',
       planktonFunctionalTypes: 'cmems_mod_glo_bgc-pft_anfc_0.25deg_P1D-m',
       zooplankton: 'cmems_mod_glo_bgc-plankton_anfc_0.25deg_P1D-m',

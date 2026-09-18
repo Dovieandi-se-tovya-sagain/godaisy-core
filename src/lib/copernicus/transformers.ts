@@ -122,6 +122,10 @@ export function toCopernicusMarineSnapshots(bundle: CopernicusMarineBundle): Cop
         
         // Core measurements
         temperatureSurface: selectSurfaceValue(physics, 'thetao'),
+        // `bottomT` on the regional physics products, `tob` on GLO's combined one.
+        // Lower-case because the Python worker normalises every variable name via
+        // var.lower() before it reaches here.
+        temperatureBottom: selectSurfaceValue(physics, 'bottomt') ?? selectSurfaceValue(physics, 'tob'),
         salinitySurface: selectSurfaceValue(physics, 'so'),
         dissolvedOxygenSurface: selectSurfaceValue(bio, 'o2'),
         chlorophyllSurface: selectSurfaceValue(bio, 'chl'),
