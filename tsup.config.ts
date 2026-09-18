@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsup';
 
   export default defineConfig({
-    entry: ['src/index.ts'],
+    entry: ['src/index.ts', 'src/mapPicker.ts'],
     format: ['esm'],  // ESM only - required for code splitting
     dts: true,
     splitting: true,  // Enable splitting so dynamic imports become separate chunks

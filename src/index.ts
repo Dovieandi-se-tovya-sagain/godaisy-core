@@ -50,6 +50,11 @@ export { LanguageSelector } from './components/LanguageSelector';
 export { TranslatedFishName, TranslatedFishBio, TranslatedText } from './components/translation/TranslatedFishCard';
 // Location components
 export { default as CoastalLocationDialog, type BasicLocation } from './components/CoastalLocationDialog';
+// Map location picker. Safe to import here because MapPicker.tsx keeps Leaflet
+// behind a lazy() — Leaflet reads `window` at module scope, and this index is
+// imported by API routes. Do not flatten that indirection.
+export { MapPicker } from './components/MapPicker';
+export type { MapPickerProps, MapPickerCoords, MapPickerSearchResult } from './components/MapPicker';
 // TODO: Add more component exports as needed
 
 // Auth utilities

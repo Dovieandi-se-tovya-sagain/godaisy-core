@@ -1,6 +1,6 @@
 {
   "name": "@dovieandi-se-tovya-sagain/godaisy-core",
-  "version": "1.0.2",
+  "version": "1.4.0",
   "description": "Shared component library for the Daisy app family",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -10,13 +10,18 @@
       "require": "./dist/index.js",
       "import": "./dist/index.mjs",
       "types": "./dist/index.d.ts"
+    },
+    "./MapPicker": {
+      "require": "./dist/mapPicker.js",
+      "import": "./dist/mapPicker.mjs",
+      "types": "./dist/mapPicker.d.ts"
     }
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "build": "tsup src/index.ts src/mapPicker.ts --format cjs,esm --dts",
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
     "lint": "tsc --noEmit",
     "prepublishOnly": "npm run build",
