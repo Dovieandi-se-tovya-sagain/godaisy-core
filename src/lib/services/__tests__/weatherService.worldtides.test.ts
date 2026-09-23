@@ -8,6 +8,14 @@
  */
 
 import { fetchWorldTides } from '../weatherService';
+import { getSupabaseServerClient } from '../../supabase/serverClient';
+
+/** The request starts 14 h before today's UTC midnight and runs to the end of day `days`. */
+const LOOKBACK_S = 14 * 3600;
+const utcMidnight = () => {
+  const now = new Date();
+  return Math.floor(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) / 1000);
+};
 
 // Mock global fetch
 global.fetch = jest.fn();
@@ -153,8 +161,8 @@ describe('fetchWorldTides', () => {
       const url = new URL(callUrl);
       const length = url.searchParams.get('length');
       
-      // 7 days = 7 * 24 * 60 * 60 = 604800 seconds
-      expect(length).toBe('604800');
+      // 7 days = 604800 s, plus the 14 h before midnight
+      expect(length).toBe(String(604800 + LOOKBACK_S));
     });
 
     it('should default to 7 days if not specified', async () => {
@@ -164,7 +172,7 @@ describe('fetchWorldTides', () => {
       const url = new URL(callUrl);
       const length = url.searchParams.get('length');
       
-      expect(length).toBe('604800'); // 7 days
+      expect(length).toBe(String(604800 + LOOKBACK_S)); // 7 days + look-back
     });
 
     it('should set User-Agent header', async () => {
@@ -238,7 +246,7 @@ describe('fetchWorldTides', () => {
       await fetchWorldTides(50.0, -5.0, 1);
       let callUrl = (global.fetch as jest.Mock).mock.calls[0][0] as string;
       let url = new URL(callUrl);
-      expect(url.searchParams.get('length')).toBe('86400'); // 1 day
+      expect(url.searchParams.get('length')).toBe(String(86400 + LOOKBACK_S)); // 1 day
 
       jest.clearAllMocks();
       (global.fetch as jest.Mock).mockResolvedValue({
@@ -251,7 +259,7 @@ describe('fetchWorldTides', () => {
       await fetchWorldTides(50.0, -5.0, 14);
       callUrl = (global.fetch as jest.Mock).mock.calls[0][0] as string;
       url = new URL(callUrl);
-      expect(url.searchParams.get('length')).toBe('1209600'); // 14 days
+      expect(url.searchParams.get('length')).toBe(String(1209600 + LOOKBACK_S)); // 14 days
     });
   });
 
@@ -455,29 +463,52 @@ describe('fetchWorldTides', () => {
   });
 
   describe('Start Time Parameter', () => {
-    it('should use current time as start parameter', async () => {
-      const beforeCall = Math.floor(Date.now() / 1000);
+    it('starts 14 hours before today’s UTC midnight, so the turn just gone is included', async () => {
       await fetchWorldTides(50.0, -5.0);
-      const afterCall = Math.floor(Date.now() / 1000);
 
       const callUrl = (global.fetch as jest.Mock).mock.calls[0][0] as string;
-      const url = new URL(callUrl);
-      const start = parseInt(url.searchParams.get('start') || '0');
+      const start = parseInt(new URL(callUrl).searchParams.get('start') || '0');
 
-      expect(start).toBeGreaterThanOrEqual(beforeCall);
-      expect(start).toBeLessThanOrEqual(afterCall);
+      expect(start).toBe(utcMidnight() - LOOKBACK_S);
     });
 
-    it('should request future extremes from now', async () => {
+    it('asks for the same window on every request that day, whatever the time', async () => {
+      await fetchWorldTides(50.0, -5.0);
       await fetchWorldTides(50.0, -5.0);
 
-      const callUrl = (global.fetch as jest.Mock).mock.calls[0][0] as string;
-      const url = new URL(callUrl);
-      const start = parseInt(url.searchParams.get('start') || '0');
-      const now = Math.floor(Date.now() / 1000);
+      const starts = (global.fetch as jest.Mock).mock.calls.map(
+        ([callUrl]) => new URL(callUrl as string).searchParams.get('start'),
+      );
+      expect(new Set(starts).size).toBe(1);
+    });
+  });
 
-      // Start should be within a few seconds of now
-      expect(Math.abs(start - now)).toBeLessThan(5);
+  describe('Cache', () => {
+    const builder = () => (getSupabaseServerClient() as unknown as { from: () => Record<string, jest.Mock> }).from();
+    const row = (firstDt: number) => ({
+      data: {
+        extremes: [{ dt: firstDt, date: new Date(firstDt * 1000).toISOString(), height: 1, type: 'Low' }],
+        datum: 'CD',
+        expires_at: new Date(Date.now() + 3600_000).toISOString(),
+      },
+      error: null,
+    });
+
+    it('serves a cached day that starts before midnight, without calling WorldTides', async () => {
+      builder().maybeSingle.mockResolvedValueOnce(row(utcMidnight() - 6 * 3600));
+
+      const result = await fetchWorldTides(50.0, -5.0);
+
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(result?.extremes[0].dt).toBe(utcMidnight() - 6 * 3600);
+    });
+
+    it('refetches a cached day written by an older version, which starts at its fetch time', async () => {
+      builder().maybeSingle.mockResolvedValueOnce(row(utcMidnight() + 5 * 3600));
+
+      await fetchWorldTides(50.0, -5.0);
+
+      expect(global.fetch).toHaveBeenCalledTimes(1);
     });
   });
 
