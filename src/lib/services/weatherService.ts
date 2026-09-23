@@ -2279,6 +2279,15 @@ export interface WorldTidesResponse {
  * @param days Number of days to fetch (default 7)
  * @returns WorldTides response with extremes array
  */
+/**
+ * How far before UTC midnight the request starts. The cache holds one
+ * response per UTC day, so it has to carry the turn before any moment of that
+ * day, and consecutive highs and lows are up to ~12.5 h apart where the tide
+ * is once a day. Measured 2026-09-23: 7 days, 7 days + 14 h and 8 days each
+ * cost WorldTides 1 credit.
+ */
+const TIDE_LOOKBACK_S = 14 * 3600;
+
 async function fetchWorldTides(
   lat: number,
   lon: number,
@@ -2295,6 +2304,12 @@ async function fetchWorldTides(
   const latBucket = round3dp(lat);
   const lonBucket = round3dp(lon);
   const startDate = new Date().toISOString().split('T')[0]; // Today's date (YYYY-MM-DD)
+  // Fixed per UTC day, so every request that day asks for the same window: from
+  // yesterday afternoon, so the turn just gone is in it, to the end of day `days`.
+  // Until 2026-09 it started at the moment of the day's first fetch, so turns
+  // earlier that day were missing from the cached response all day.
+  const midnight = Math.floor(Date.parse(`${startDate}T00:00:00Z`) / 1000);
+  const windowStart = midnight - TIDE_LOOKBACK_S;
 
   try {
     // **PHASE 2.1: Check cache first**
@@ -2312,7 +2327,12 @@ async function fetchWorldTides(
       .limit(1)
       .maybeSingle();
 
-    if (!cacheError && cachedData) {
+    // A row written by an older version starts at its fetch time, not before
+    // midnight: treat it as a miss so the turn just gone is fetched and stored.
+    const cachedExtremes = (cachedData?.extremes ?? []) as WorldTidesExtreme[];
+    const coversDayStart = cachedExtremes.length > 0 && cachedExtremes[0].dt < midnight;
+
+    if (!cacheError && cachedData && coversDayStart) {
       console.log('[WorldTides] Cache hit', {
         lat_bucket: latBucket,
         lon_bucket: lonBucket,
@@ -2339,10 +2359,8 @@ async function fetchWorldTides(
     url.searchParams.set('extremes', '');
     url.searchParams.set('lat', String(lat));
     url.searchParams.set('lon', String(lon));
-    // Use start/length for best practice and test compatibility
-    const now = Math.floor(Date.now() / 1000); // Unix timestamp (seconds)
-    url.searchParams.set('start', String(now));
-    url.searchParams.set('length', String(days * 86400));
+    url.searchParams.set('start', String(windowStart));
+    url.searchParams.set('length', String(days * 86400 + TIDE_LOOKBACK_S));
     url.searchParams.set('datum', 'CD');
     url.searchParams.set('localtime', '');
     url.searchParams.set('key', WORLDTIDES_API_KEY);
