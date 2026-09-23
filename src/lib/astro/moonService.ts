@@ -68,6 +68,14 @@ interface IpGeoAstronomyResponse {
   moon_age?: string | number;
   moon_angle?: number; // Can be used to calculate moon age if moon_age not available
   current_time?: string;
+  /**
+   * Exact instants (ISO, UTC). Preferred over the HH:MM fields, which only mean
+   * something alongside the right zone -- and the moon times never had one.
+   */
+  sunrise_iso?: string;
+  sunset_iso?: string;
+  moonrise_iso?: string;
+  moonset_iso?: string;
   [key: string]: unknown;
 }
 
@@ -77,10 +85,20 @@ interface FetchParams {
   date?: string;
 }
 
-const DEFAULT_PROVIDER = 'ipgeolocation';
+const DEFAULT_PROVIDER = 'unknown';
 const COORD_PRECISION = 3; // 0.001° grid (~110m) matches weather cache precision
 const COORD_FACTOR = 10 ** COORD_PRECISION;
 const SYNODIC_MONTH_DAYS = 29.530588853;
+
+/**
+ * Written into each cache row's `raw`. Rows without it were written before the
+ * moon times were stored as instants and hold moonrise/moonset shifted by the
+ * place's UTC offset (measured 2026-09-23: Valencia 14:20Z for a 16:20Z
+ * moonrise, Charleston 01:40Z next day for 21:40Z). moon_cache is shared by
+ * every app on every godaisy-core version, so older versions keep writing such
+ * rows: a reader on this version treats them as a miss and overwrites them.
+ */
+const CACHE_FORMAT = 2;
 
 let cacheDisabled = false;
 let hasLoggedCacheDisable = false;
@@ -257,6 +275,10 @@ function toZonedInstantISO(localDate: string, time: string | undefined, timeZone
   }
 }
 
+function toIso(date?: Date): string | undefined {
+  return date && !Number.isNaN(date.getTime()) ? date.toISOString() : undefined;
+}
+
 async function readFromCache(
   client: SupabaseClient,
   latBucket: number,
@@ -294,6 +316,9 @@ async function readFromCache(
     return null;
   }
   if (!data) {
+    return null;
+  }
+  if (data.raw?.cache_format !== CACHE_FORMAT) {
     return null;
   }
   const expiresAt = Date.parse(data.expires_at);
@@ -336,7 +361,7 @@ async function writeCache(
       source: payload.source,
       cached_at: payload.cachedAt,
       expires_at: payload.expiresAt,
-      raw,
+      raw: { ...(raw ?? {}), cache_format: CACHE_FORMAT },
     },
     { onConflict: 'lat_bucket,lon_bucket,local_date' }
   );
@@ -397,7 +422,7 @@ function computeExpiryIso(localDate: string, timeZone: string): string {
  */
 async function fetchFromOpenMeteo(lat: number, lon: number, date: string): Promise<IpGeoAstronomyResponse | null> {
   try {
-    // Round to 0dp for astronomy API calls (same precision as ipgeolocation)
+    // Round to 0dp for the API call: sunrise and sunset barely move within a degree
     const rlat = round0dp(lat);
     const rlon = round0dp(lon);
     
@@ -431,19 +456,21 @@ async function fetchFromOpenMeteo(lat: number, lon: number, date: string): Promi
       return null;
     }
 
-    // Get moon data from SunCalc for this location and date
+    // Moon data from SunCalc, for the real point (it's free, so no need to round)
     const targetDate = new Date(data.daily.time[0] + 'T12:00:00Z');
-    const moonTimes = getMoonTimes(targetDate, rlat, rlon);
+    const moonTimes = getMoonTimes(targetDate, lat, lon);
     const moonIllum = getMoonIllumination(targetDate);
 
-    // Convert Open-Meteo format + SunCalc moon data to IpGeoAstronomyResponse format
+    // Sunrise/sunset are Open-Meteo's, in the place's local time, so HH:MM plus
+    // its zone is right. The moon times are SunCalc instants and go through as
+    // instants: as HH:MM they were UTC clock times labelled with the local zone.
     const result: IpGeoAstronomyResponse = {
       date: data.daily.time[0],
       timezone: data.timezone || 'UTC',
       sunrise: data.daily.sunrise?.[0]?.substring(11, 16), // Extract HH:MM from ISO
       sunset: data.daily.sunset?.[0]?.substring(11, 16),
-      moonrise: moonTimes.rise?.toISOString().substring(11, 16),
-      moonset: moonTimes.set?.toISOString().substring(11, 16),
+      moonrise_iso: toIso(moonTimes.rise),
+      moonset_iso: toIso(moonTimes.set),
       moon_angle: moonIllum.phase * 360, // Convert 0-1 to degrees
       moon_illumination_percentage: moonIllum.fraction * 100, // Convert 0-1 to percentage
     };
@@ -472,10 +499,10 @@ async function fetchFromSunCalc(lat: number, lon: number, date: string): Promise
     const result: IpGeoAstronomyResponse = {
       date,
       timezone: 'UTC',
-      sunrise: sunTimes.sunrise?.toISOString().substring(11, 16), // HH:MM format
-      sunset: sunTimes.sunset?.toISOString().substring(11, 16),
-      moonrise: moonTimes.rise?.toISOString().substring(11, 16),
-      moonset: moonTimes.set?.toISOString().substring(11, 16),
+      sunrise_iso: toIso(sunTimes.sunrise),
+      sunset_iso: toIso(sunTimes.sunset),
+      moonrise_iso: toIso(moonTimes.rise),
+      moonset_iso: toIso(moonTimes.set),
       moon_angle: moonIllum.phase * 360, // Convert 0-1 to degrees
       moon_illumination_percentage: moonIllum.fraction * 100, // Convert 0-1 to percentage
     };
@@ -492,38 +519,6 @@ async function fetchFromSunCalc(lat: number, lon: number, date: string): Promise
   }
 }
 
-async function requestAstronomyData({ lat, lon, date }: FetchParams): Promise<IpGeoAstronomyResponse> {
-  const apiKey = process.env.MOON_API_KEY || process.env.IPGEOLOCATION_API_KEY;
-  const apiUrl = process.env.MOON_API_URL || 'https://api.ipgeolocation.io/astronomy';
-
-  if (!apiKey) {
-    throw new Error('Moon data API key missing: set MOON_API_KEY or IPGEOLOCATION_API_KEY.');
-  }
-
-  // Round to 0dp (whole degrees ~111km) for astronomy data with 24h cache
-  const rlat = round0dp(lat);
-  const rlon = round0dp(lon);
-
-  const params = new URLSearchParams({
-    apiKey,
-    lat: String(rlat),
-    long: String(rlon),
-  });
-  if (date) {
-    params.set('date', date);
-  }
-
-  const url = `${apiUrl}?${params.toString()}`;
-  const response = await fetch(url, { method: 'GET' });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Moon data API error (${response.status}): ${text}`);
-  }
-
-  return (await response.json()) as IpGeoAstronomyResponse;
-}
-
 function buildPayload(
   data: IpGeoAstronomyResponse,
   latBucket: number,
@@ -536,11 +531,11 @@ function buildPayload(
   // Calculate moon age from moon_angle if moon_age not available
   const moonAge = data.moon_age ?? (data.moon_angle != null ? (data.moon_angle / 360) * SYNODIC_MONTH_DAYS : undefined);
   const moonPhaseFraction = parseMoonFraction(moonAge, illuminationPct);
-  const sunriseISO = toZonedInstantISO(localDate, data.sunrise as string | undefined, timezone);
-  const sunsetISO = toZonedInstantISO(localDate, data.sunset as string | undefined, timezone);
-  const moonriseISO = toZonedInstantISO(localDate, data.moonrise as string | undefined, timezone) ??
+  const sunriseISO = data.sunrise_iso ?? toZonedInstantISO(localDate, data.sunrise as string | undefined, timezone);
+  const sunsetISO = data.sunset_iso ?? toZonedInstantISO(localDate, data.sunset as string | undefined, timezone);
+  const moonriseISO = data.moonrise_iso ?? toZonedInstantISO(localDate, data.moonrise as string | undefined, timezone) ??
     toZonedInstantISO(localDate, (data as Record<string, unknown>)['moonrise_next'] as string | undefined, timezone);
-  const moonsetISO = toZonedInstantISO(localDate, data.moonset as string | undefined, timezone) ??
+  const moonsetISO = data.moonset_iso ?? toZonedInstantISO(localDate, data.moonset as string | undefined, timezone) ??
     toZonedInstantISO(localDate, (data as Record<string, unknown>)['moonset_previous'] as string | undefined, timezone);
   
   const moonPhaseStage = getMoonPhaseStage(moonPhaseFraction);
@@ -594,23 +589,9 @@ export async function getMoonSunData(params: FetchParams): Promise<MoonSunData> 
     source = 'openmeteo';
   }
 
-  // 3. Try ipgeolocation.io (PAID, only if API key exists and Open-Meteo failed)
-  if (!live) {
-    const hasApiKey = !!(process.env.MOON_API_KEY || process.env.IPGEOLOCATION_API_KEY);
-    if (hasApiKey) {
-      console.log('⚠️  Open-Meteo unavailable, trying ipgeolocation.io (PAID)');
-      try {
-        live = await requestAstronomyData(params);
-        source = 'ipgeolocation-paid';
-      } catch (error) {
-        console.error('❌ ipgeolocation.io error:', error);
-      }
-    } else {
-      console.log('📊 No paid API key configured, skipping ipgeolocation.io');
-    }
-  }
-
-  // 4. Fallback to SunCalc (FREE, local calculation - always works)
+  // 3. Fallback to SunCalc (FREE, local calculation - always works). There used
+  // to be a paid ipgeolocation.io step before this; it returned local times with
+  // no zone, which were then stored as UTC, and it gave nothing SunCalc doesn't.
   if (!live) {
     console.log('📊 All APIs unavailable, using SunCalc local calculation');
     live = await fetchFromSunCalc(params.lat, params.lon, previewDate);
