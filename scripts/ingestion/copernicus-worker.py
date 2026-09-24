@@ -73,17 +73,24 @@ def is_valid_value(val, var_name):
     if 'temp' in var_lower or 'thetao' in var_lower or 'to' in var_lower or 'sst' in var_lower:
         if val < -5 or val > 50:
             return False
-
-    if 'sal' in var_lower or 'so' in var_lower:
-        if val < 0 or val > 50:
+        # Exactly 0.0 is a fill value, not a reading. 33 cells were stored at
+        # 0.0 degC in 2026-09 -- Sea of Japan, Adriatic, Gulf of Mexico in
+        # September -- each alongside a valid salinity from the same response.
+        if val == 0:
             return False
 
+    if 'sal' in var_lower or 'so' in var_lower:
+        if val <= 0 or val > 50:
+            return False
+
+    # Sea water always has some chlorophyll and attenuates light; an exact 0
+    # is a fill value, like the thetao case above.
     if 'chl' in var_lower:
-        if val < 0 or val > 100:
+        if val <= 0 or val > 100:
             return False
 
     if 'kd' in var_lower or 'atten' in var_lower:
-        if val < 0 or val > 10:
+        if val <= 0 or val > 10:
             return False
 
     if 'o2' in var_lower or 'oxygen' in var_lower:
