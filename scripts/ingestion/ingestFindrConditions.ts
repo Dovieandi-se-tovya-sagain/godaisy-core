@@ -21,6 +21,7 @@ import {
   type WorldTidesResponse,
 } from '../../src/lib/services/weatherService';
 import { redactOpenMeteoError } from '../../src/lib/services/openMeteoUrl';
+import { pickNextExtremes, type TideExtremePoint } from './tideExtremes';
 
 interface UpsertRow {
   rectangle_code: string;
@@ -858,7 +859,7 @@ export async function ingestRectangle(
   }
 
   // Tide data: 3-tier waterfall (WorldTides → NOAA → Stormglass)
-  let tideData: Array<{ time: string; type: string; height: number }> | null = null;
+  let tideData: Array<TideExtremePoint & { height: number }> | null = null;
   let tideSource: 'worldtides' | 'noaa' | 'stormglass' | 'none' = 'none';
 
   // 1. Try WorldTides first (FREE, global coverage)
@@ -867,7 +868,8 @@ export async function ingestRectangle(
     tideData = worldTidesData.extremes.map(e => ({
       time: e.date,
       type: e.type.toLowerCase(),
-      height: e.height
+      height: e.height,
+      epochMs: Number.isFinite(e.dt) ? e.dt * 1000 : undefined,
     }));
     tideSource = 'worldtides';
     console.info(`[${rectangleCode}] Using WorldTides for tides (FREE)`);
@@ -932,8 +934,10 @@ export async function ingestRectangle(
     ?? openMeteoMarine?.windDirectionDeg
     ?? toFixedOrNull(sgNumber(marineRaw?.hours?.[0]?.windDirection), 0);
 
-  const nextHigh = tideData?.find((point) => String(point.type).toLowerCase().includes('high'))?.time ?? null;
-  const nextLow = tideData?.find((point) => String(point.type).toLowerCase().includes('low'))?.time ?? null;
+  // The next high and low AFTER this capture. Every source's series starts
+  // before now (WorldTides 14 h before midnight, NOAA at midnight), so the
+  // first high/low in it is usually in the past. See tideExtremes.ts.
+  const { nextHigh, nextLow } = pickNextExtremes(tideData, Date.parse(capturedAtISO));
 
   // Calculate tide phase and flow speed using helper functions
   let tidePhase: string | null = null;
