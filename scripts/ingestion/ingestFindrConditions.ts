@@ -22,6 +22,7 @@ import {
 } from '../../src/lib/services/weatherService';
 import { redactOpenMeteoError } from '../../src/lib/services/openMeteoUrl';
 import { pickNextExtremes, type TideExtremePoint } from './tideExtremes';
+import { snapshotColumnsToWrite } from './snapshotColumns';
 
 interface UpsertRow {
   rectangle_code: string;
@@ -1031,12 +1032,11 @@ export async function ingestRectangle(
   // rectangle_code, captured_at and source are always sent: the first two are
   // the identity and the trigger's input, and source records which feed last
   // contributed.
-  const ALWAYS_SEND = new Set(['rectangle_code', 'captured_at', 'source']);
-  const writableRow = Object.fromEntries(
-    Object.entries(row).filter(
-      ([key, value]) => ALWAYS_SEND.has(key) || (value !== null && value !== undefined),
-    ),
-  );
+  //
+  // The exception is tide_phase / tide_flow_speed_ms, derived from the tide
+  // times this run writes: they travel with those times, null included. See
+  // snapshotColumns.ts.
+  const writableRow = snapshotColumnsToWrite(row);
 
   const { error } = await client.from('findr_conditions_snapshots').upsert(writableRow as any, {
     onConflict: 'rectangle_code,snapshot_day',
